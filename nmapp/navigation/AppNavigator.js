@@ -30,10 +30,12 @@
 
 
 
-
-import React, { useEffect, useState } from "react";
+import React, { useEffect, useState, useRef } from "react";
 import { createNativeStackNavigator } from "@react-navigation/native-stack";
 import AsyncStorage from '@react-native-async-storage/async-storage';
+import { Animated, View, Text, StyleSheet } from 'react-native';
+import { Ionicons } from '@expo/vector-icons';
+import { LinearGradient } from 'expo-linear-gradient';
 
 import TabNavigator from './TabNavigator';
 import LoginScreen from '../screens/LoginScreen';
@@ -47,6 +49,90 @@ import { logoutUser } from '../api/LogsApi';
 
 const Stack = createNativeStackNavigator();
 
+const CustomHeader = ({ title }) => {
+  const titleOpacity = useRef(new Animated.Value(0)).current;
+  const titlePosition = useRef(new Animated.Value(-80)).current;
+  const gearOpacity = useRef(new Animated.Value(1)).current;
+  const containerWidth = useRef(new Animated.Value(180)).current;
+  const containerHeight = useRef(new Animated.Value(60)).current;
+  const titleSize = useRef(new Animated.Value(20)).current;
+  
+  React.useEffect(() => {
+    Animated.sequence([
+      Animated.parallel([
+        Animated.timing(titleOpacity, {
+          toValue: 1,
+          duration: 600,
+          useNativeDriver: false,
+        }),
+        Animated.spring(titlePosition, {
+          toValue: 0,
+          speed: 55,
+          bounciness: 10,
+          useNativeDriver: false,
+        }),
+      ]),
+      Animated.delay(800),
+      Animated.parallel([
+        Animated.timing(gearOpacity, {
+          toValue: 0,
+          duration: 400,
+          useNativeDriver: false,
+        }),
+        Animated.timing(containerWidth, {
+          toValue: 190,
+          duration: 400,
+          useNativeDriver: false,
+        }),
+        Animated.timing(containerHeight, {
+          toValue: 45,
+          duration: 400,
+          useNativeDriver: false,
+        }),
+        Animated.timing(titleSize, {
+          toValue: 17,
+          duration: 400,
+          useNativeDriver: false,
+        })
+      ])
+    ]).start();
+  }, []);
+
+  return (
+    <LinearGradient
+      colors={['#5279a8', '#2b75a6']}
+      start={[0, 0]}
+      end={[1, 1]}
+      style={styles.headerContainer}
+    >
+      <Animated.View style={[styles.headerTitleContainer, {
+        opacity: titleOpacity,
+        transform: [{ translateX: titlePosition }],
+        width: containerWidth,
+        height: containerHeight,
+      }]}>
+        <Animated.View style={{ opacity: gearOpacity }}>
+          <Ionicons 
+            name="settings" 
+            size={20} 
+            color="#fff" 
+            style={styles.gearIcon}
+          />
+        </Animated.View>
+        <Animated.Text style={[styles.headerTitle, {
+          fontSize: titleSize,
+          marginLeft: titleSize.interpolate({
+            inputRange: [16, 30],
+            outputRange: [8, 12]
+          })
+        }]}>
+          {title}
+        </Animated.Text>
+      </Animated.View>
+    </LinearGradient>
+  );
+};
+
 const AppNavigator = () => {
   const [isLoggedIn, setIsLoggedIn] = useState(null);
   const [userData, setUserData] = useState(null);
@@ -57,9 +143,6 @@ const AppNavigator = () => {
       try {
         const rawUser = await AsyncStorage.getItem('user');
         const session = await AsyncStorage.getItem('sessionId');
-
-        // console.log("👀 Checking login user:", rawUser);
-        // console.log("👀 Session ID:", session);
 
         if (rawUser && session) {
           const parsedUser = JSON.parse(rawUser);
@@ -78,19 +161,29 @@ const AppNavigator = () => {
     checkLogin();
   }, []);
 
-  if (isLoggedIn === null) return null; // Optional: Splash screen or spinner
+  if (isLoggedIn === null) return null;
 
   return (
-    <Stack.Navigator screenOptions={{ headerShown: false }}>
+    <Stack.Navigator
+      screenOptions={{
+        header: ({ navigation, route, options }) => (
+          <CustomHeader title={options.title || route.name} />
+        ),
+        headerStyle: {
+          height: 70,
+        },
+      }}
+    >
       {isLoggedIn ? (
         <>
-          <Stack.Screen name="Tabs">
+          <Stack.Screen 
+            name="Tabs"
+            options={{ headerShown: false }}
+          >
             {(props) => (
               <TabNavigator
                 {...props}
                 onLogout={async () => {
-                  // console.log("🚪 Logout initiated...");
-
                   if (!userData?.token || !sessionId) {
                     console.warn("⚠️ Cannot logout, missing user or session ID");
                     setIsLoggedIn(false);
@@ -98,8 +191,6 @@ const AppNavigator = () => {
                   }
 
                   const success = await logoutUser(userData.token, sessionId);
-                  // console.log("🔚 Logout success?", success);
-
                   if (!success) {
                     console.warn("⚠️ Logout may not have completed properly on server");
                   }
@@ -115,47 +206,83 @@ const AppNavigator = () => {
           <Stack.Screen
             name="MachineDetail"
             component={MachineDetail}
-            options={{ headerShown: true, title: 'Machine Detail' }}
+            options={{ title: 'Machine Detail' }}
           />
           <Stack.Screen
             name="DownloadScreen"
             component={DownloadScreen}
-            options={{ headerShown: true, title: 'Download Report' }}
+            options={{ title: 'Download Report' }}
           />
-          <Stack.Screen name="HistoryScreen" component={HistoryScreen} />
-          <Stack.Screen name="LogsScreen" component={LogsScreen} />
+          <Stack.Screen 
+            name="HistoryScreen" 
+            component={HistoryScreen} 
+            options={{ title: 'History' }}
+          />
+          <Stack.Screen 
+            name="LogsScreen" 
+            component={LogsScreen} 
+            options={{ title: 'System Logs' }}
+          />
         </>
       ) : (
         <>
-          <Stack.Screen name="Login">
+          <Stack.Screen 
+            name="Login"
+            options={{ headerShown: false }}
+          >
             {(props) => (
               <LoginScreen
                 {...props}
-               onLogin={async () => {
-  const rawUser = await AsyncStorage.getItem('user');
-  const session = await AsyncStorage.getItem('sessionId');
+                onLogin={async () => {
+                  const rawUser = await AsyncStorage.getItem('user');
+                  const session = await AsyncStorage.getItem('sessionId');
 
-  // console.log("🧠 [onLogin] Raw user:", rawUser);
-  // console.log("🧠 [onLogin] Session ID:", session);
-
-  if (rawUser && session) {
-    const parsedUser = JSON.parse(rawUser);
-    setUserData(parsedUser);
-    setSessionId(session);
-    setIsLoggedIn(!!parsedUser?.token);
-  } else {
-    setIsLoggedIn(false);
-  }
-}}
-
+                  if (rawUser && session) {
+                    const parsedUser = JSON.parse(rawUser);
+                    setUserData(parsedUser);
+                    setSessionId(session);
+                    setIsLoggedIn(!!parsedUser?.token);
+                  } else {
+                    setIsLoggedIn(false);
+                  }
+                }}
               />
             )}
           </Stack.Screen>
-          <Stack.Screen name="Register" component={RegisterScreen} />
+          <Stack.Screen 
+            name="Register" 
+            component={RegisterScreen} 
+            options={{ headerShown: false }}
+          />
         </>
       )}
     </Stack.Navigator>
   );
 };
+
+const styles = StyleSheet.create({
+  headerContainer: {
+    height: 70,
+    justifyContent: 'center',
+    // alignItems: 'center',
+    marginTop:30,
+  },
+  headerTitleContainer: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'center',
+    borderRadius: 20,
+    backgroundColor: 'rgba(255,255,255,0.15)',
+    
+    // paddingHorizontal: 5,
+  },
+  headerTitle: {
+    fontWeight: '600',
+    color: '#fff',
+  },
+  gearIcon: {
+    marginRight: 8,
+  },
+});
 
 export default AppNavigator;

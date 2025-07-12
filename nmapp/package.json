@@ -30,6 +30,7 @@
     "expo-file-system": "~18.1.11",
     "expo-font": "~13.3.2",
     "expo-haptics": "~14.1.4",
+    "expo-linear-gradient": "~14.1.5",
     "expo-media-library": "~17.1.7",
     "expo-print": "~14.1.4",
     "expo-sharing": "~13.1.5",
@@ -49,15 +50,14 @@
     "react-native-modal-datetime-picker": "^18.0.0",
     "react-native-pdf-lib": "^1.0.0",
     "react-native-permissions": "^5.4.1",
-    "react-native-reanimated": "^3.18.0",
+    "react-native-reanimated": "~3.17.4",
     "react-native-safe-area-context": "^5.5.1",
     "react-native-screens": "^4.11.1",
     "react-native-vector-icons": "^10.2.0",
     "react-native-view-shot": "^4.0.3",
     "react-native-web": "^0.20.0",
     "timezone": "^1.0.23",
-    "utc": "^0.1.0",
-    "expo-linear-gradient": "~14.1.5"
+    "utc": "^0.1.0"
   },
   "devDependencies": {
     "@babel/core": "^7.20.0"

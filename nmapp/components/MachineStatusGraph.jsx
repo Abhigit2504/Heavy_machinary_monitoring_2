@@ -13,7 +13,6 @@ import axios from 'axios';
 import dayjs from 'dayjs';
 import Ionicons from 'react-native-vector-icons/Ionicons';
 
-
 const theme = {
   primary: "#4a6da7",
   secondary: "#a8c6fa",
@@ -31,7 +30,6 @@ const theme = {
 
 import { BASE_URL } from '../config';
 
-// const BASE_URL = 'http://192.168.1.4:8000';
 const MAX_POINTS_PER_PAGE = 50;
 const pointWidth = 60;
 
@@ -43,22 +41,17 @@ const MachineStatusGraph = ({ gfrid, fromDate, toDate, range }) => {
   const [page, setPage] = useState(0);
 
   const fetchData = async () => {
-    
     try {
       setLoading(true);
       const params = {
-  gfrid,
-  from_date: dayjs(fromDate).utc().toISOString(),
-to_date: dayjs(toDate).utc().toISOString(),
+        gfrid,
+        from_date: dayjs(fromDate).utc().toISOString(),
+        to_date: dayjs(toDate).utc().toISOString(),
+        range: range || '1h',
+      };
 
-  range: range || '1h', // ✅ fallback
-};
-
-
-      // console.log("📦 API Params:", params);
       const res = await axios.get(`${BASE_URL}/api/machine-status/`, { params });
       const { on_time_sec, off_time_sec, status_records } = res.data;
-      // console.log("✅ API Response:", res.data);
       const pulsePoints = [];
       const hourlyUsage = {};
 
@@ -110,10 +103,9 @@ to_date: dayjs(toDate).utc().toISOString(),
     }
   };
 
-useEffect(() => {
-  fetchData();
-}, [gfrid, fromDate, toDate, range]); // ✅ Make sure range is here
-
+  useEffect(() => {
+    fetchData();
+  }, [gfrid, fromDate, toDate, range]);
 
   const totalPages = Math.ceil(statusData.length / MAX_POINTS_PER_PAGE);
   const currentData = statusData.slice(page * MAX_POINTS_PER_PAGE, (page + 1) * MAX_POINTS_PER_PAGE);
@@ -128,190 +120,255 @@ useEffect(() => {
     return `${h.toString().padStart(2, '0')}:${m.toString().padStart(2, '0')}:${s.toString().padStart(2, '0')}`;
   };
 
-  if (loading) return <ActivityIndicator size="large" style={{ marginTop: 50 }} />;
+  if (loading) return <ActivityIndicator size="large" style={{ marginTop: 50 }} color="#4a6da7" />;
 
   return (
     <ScrollView style={styles.container}>
-      <View style={styles.summaryContainer}>
-        <Text style={styles.summaryHeader}>
-          <Ionicons name="time" size={24} color="#1E3A8A" /> Machine Runtime Summary
-        </Text>
-        <Text style={styles.summaryText}>
-          <Ionicons name="toggle-sharp" size={16} color={theme.success} />
-          ON Time: {formatTime(statusDetails.onTime)}</Text>
-        <Text style={styles.summaryText}>
-        <Ionicons name="toggle-sharp" size={16} color={"red"} />
-          OFF Time: {formatTime(statusDetails.offTime)}</Text>
-      </View>
-
-      <Text style={styles.chartTitle}>Machine Status</Text>
-      <ScrollView horizontal showsHorizontalScrollIndicator={false}>
-        <View style={{ flexDirection: 'row' }}>
-          {/* Y-Axis Labels */}
-          <View style={styles.yAxisLabels}>
-            <Text style={styles.yAxisLabelText}>ON</Text>
-            <Text style={styles.yAxisLabelText}>OFF</Text>
-          </View>
-
-          {/* Chart */}
-          <View>
-            <LineChart
-              data={{
-                labels: [],
-                datasets: [{ data: chartValues.length > 0 ? chartValues : [0] }],
-              }}
-              width={chartWidth}
-              height={260}
-              fromZero
-              withDots={false}
-              withInnerLines={true}
-              withOuterLines={true}
-              withVerticalLabels={false} // disable default Y-axis labels
-              chartConfig={{
-                backgroundGradientFrom: '#fff',
-                backgroundGradientTo: '#fff',
-                color: () => '#0f172a',
-                labelColor: () => '#334155',
-                decimalPlaces: 0,
-              }}
-              style={{ paddingRight: 0, paddingLeft: 0, marginBottom: 0 }}
-            />
-
-            <View style={[styles.labelContainer, { width: chartWidth }]}>
-              {currentData.length > 0 ? currentData.map(({ label1, label2 }, idx) => (
-                <View key={idx} style={styles.labelItem}>
-                  <Text style={styles.labelText}>{label1}</Text>
-                  <Text style={styles.labelSubText}>{label2}</Text>
-                </View>
-              )) : (
-                <View style={styles.labelItem}>
-                  <Text style={styles.labelText}>--:--</Text>
-                  <Text style={styles.labelSubText}>N/A</Text>
-                </View>
-              )}
+      {/* Enhanced Runtime Summary Card */}
+      <View style={styles.summaryCard}>
+        <View style={styles.summaryHeader}>
+          <Ionicons name="time-outline" size={24} color="#fff" />
+          <Text style={styles.summaryHeaderText}>Machine Runtime Summary</Text>
+        </View>
+        <View style={styles.summaryContent}>
+          <View style={styles.summaryRow}>
+            <View style={styles.summaryItem}>
+              <Ionicons name="power" size={20} color="#10b981" />
+              <Text style={styles.summaryLabel}>ON Time:</Text>
+              <Text style={styles.summaryValue}>{formatTime(statusDetails.onTime)}</Text>
+            </View>
+            <View style={styles.summaryItem}>
+              <Ionicons name="power" size={20} color="#ef4444" />
+              <Text style={styles.summaryLabel}>OFF Time:</Text>
+              <Text style={styles.summaryValue}>{formatTime(statusDetails.offTime)}</Text>
             </View>
           </View>
         </View>
-      </ScrollView>
-
-      <View style={styles.paginationContainer}>
-        <TouchableOpacity
-          disabled={page === 0}
-          onPress={() => setPage((prev) => Math.max(prev - 1, 0))}
-        >
-          <Ionicons name="chevron-back-circle" size={36} color={page === 0 ? '#ccc' : '#1E3A8A'} />
-        </TouchableOpacity>
-
-        <Text style={styles.pageText}>{`Page ${page + 1} of ${totalPages}`}</Text>
-
-        <TouchableOpacity
-          disabled={page === totalPages - 1}
-          onPress={() => setPage((prev) => Math.min(prev + 1, totalPages - 1))}
-        >
-          <Ionicons name="chevron-forward-circle" size={36} color={page === totalPages - 1 ? '#ccc' : '#1E3A8A'} />
-        </TouchableOpacity>
       </View>
 
-      <Text style={styles.chartTitle}>Hourly Usage </Text>
-      <ScrollView horizontal showsHorizontalScrollIndicator={false}>
-        <LineChart
-          data={{
-            labels: usageData.labels,
-            datasets: [{ data: usageData.values }],
-          }}
-          width={Math.max(screenWidth, usageData.labels.length * 50)}
-          height={300}
-          fromZero
-          bezier
-          yAxisSuffix="m"
-          chartConfig={{
-            backgroundGradientFrom: '#fff',
-            backgroundGradientTo: '#fff',
-            decimalPlaces: 1,
-            color: () => '#ff6b6b',
-            labelColor: () => '#000',
-          }}
-        />
-      </ScrollView>
+      {/* Machine Status Graph in Card */}
+      <View style={styles.graphCard}>
+        <Text style={styles.chartTitle}>Machine Status</Text>
+        <ScrollView horizontal showsHorizontalScrollIndicator={false}>
+          <View style={{ flexDirection: 'row' }}>
+            {/* Y-Axis Labels */}
+            <View style={styles.yAxisLabels}>
+              <Text style={styles.yAxisLabelText}>ON</Text>
+              <Text style={styles.yAxisLabelText}>OFF</Text>
+            </View>
+
+            {/* Chart */}
+            <View>
+              <LineChart
+                data={{
+                  labels: [],
+                  datasets: [{ data: chartValues.length > 0 ? chartValues : [0] }],
+                }}
+                width={chartWidth}
+                height={240}
+                fromZero
+                withDots={true}
+                withInnerLines={true}
+                withOuterLines={false}
+                withVerticalLabels={false}
+                chartConfig={{
+                  backgroundGradientFrom: '#fff',
+                  backgroundGradientTo: '#fff',
+                  color: () => '#0f172a',
+                  labelColor: () => 'black',
+                  decimalPlaces: 0,
+                }}
+                style={{ paddingRight: 0, paddingLeft: 0, marginBottom: 0 }}
+              />
+
+              <View style={[styles.labelContainer, { width: chartWidth }]}>
+                {currentData.length > 0 ? currentData.map(({ label1, label2 }, idx) => (
+                  <View key={idx} style={styles.labelItem}>
+                    <Text style={styles.labelText}>{label1}</Text>
+                    <Text style={styles.labelSubText}>{label2}</Text>
+                  </View>
+                )) : (
+                  <View style={styles.labelItem}>
+                    <Text style={styles.labelText}>--:--</Text>
+                    <Text style={styles.labelSubText}>N/A</Text>
+                  </View>
+                )}
+              </View>
+            </View>
+          </View>
+        </ScrollView>
+
+        <View style={styles.paginationContainer}>
+          <TouchableOpacity
+            disabled={page === 0}
+            onPress={() => setPage((prev) => Math.max(prev - 1, 0))}
+          >
+            <Ionicons name="chevron-back-circle" size={36} color={page === 0 ? '#ccc' : '#1E3A8A'} />
+          </TouchableOpacity>
+
+          <Text style={styles.pageText}>{`Page ${page + 1} of ${totalPages}`}</Text>
+
+          <TouchableOpacity
+            disabled={page === totalPages - 1}
+            onPress={() => setPage((prev) => Math.min(prev + 1, totalPages - 1))}
+          >
+            <Ionicons name="chevron-forward-circle" size={36} color={page === totalPages - 1 ? '#ccc' : '#1E3A8A'} />
+          </TouchableOpacity>
+        </View>
+      </View>
+
+      {/* Hourly Usage Graph in Card */}
+      <View style={styles.graphCard}>
+        <Text style={styles.chartTitle}>Hourly Usage</Text>
+        <ScrollView horizontal showsHorizontalScrollIndicator={false}>
+          <LineChart
+            data={{
+              labels: usageData.labels,
+              datasets: [{ data: usageData.values }],
+            }}
+            width={Math.max(screenWidth, usageData.labels.length * 50)}
+            height={300}
+            fromZero
+            bezier
+            yAxisSuffix="m"
+            chartConfig={{
+              backgroundGradientFrom: '#fff',
+              backgroundGradientTo: '#fff',
+              decimalPlaces: 1,
+              color: () => '#ff6b6b',
+              labelColor: () => '#000',
+            }}
+          />
+        </ScrollView>
+      </View>
     </ScrollView>
   );
 };
 
 const styles = StyleSheet.create({
-  container: { backgroundColor: '#f0f4f8', padding: 12 },
-  summaryContainer: {
-    backgroundColor: '#e0f2fe',
-    padding: 18,
-    borderRadius: 16,
-    marginBottom: 18,
-    elevation: 4,
+  container: {
+    flex: 1,
+    backgroundColor: '#f8fafc',
+    padding: 6,
+  },
+  summaryCard: {
+    backgroundColor: '#4a6da7',
+    borderRadius: 12,
+    marginBottom: 10,
+    elevation: 3,
+    shadowColor: '#000',
+    shadowOffset: { width: 0, height: 2 },
+    shadowOpacity: 0.1,
+    shadowRadius: 4,
+    padding:16
   },
   summaryHeader: {
-    fontSize: 20,
-    fontWeight: 'bold',
-    marginBottom: 10,
-    color: '#1E3A8A',
-    textAlign: 'center',
+    flexDirection: 'row',
+    alignItems: 'center',
+    padding: 6,
+    borderTopLeftRadius: 12,
+    borderTopRightRadius: 12,
+    backgroundColor: '#3a5a8f',
   },
-  summaryText: {
+  summaryHeaderText: {
+    color: '#fff',
+    fontSize: 18,
+    fontWeight: '600',
+    marginLeft: 10,
+  },
+  summaryContent: {
+    padding: 6,
+  },
+  sumaryRow: {
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+  },
+  summaryItem: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    marginVertical: 4,
+  },
+  summaryLabel: {
+    color: '#e2e8f0',
     fontSize: 16,
-    color: '#334155',
-    marginBottom: 6,
-    textAlign: 'center',
+    fontWeight: '500',
+    marginHorizontal: 10,
+    width: 90,
+  },
+  summaryValue: {
+    color: '#fff',
+    fontSize: 16,
+    fontWeight: '600',
+  },
+  graphCard: {
+    backgroundColor: '#ffffff',
+    borderRadius: 12,
+    padding: 3,
+    marginBottom: 10,
+    elevation: 2,
+    shadowColor: '#000',
+    shadowOffset: { width: 0, height: 1 },
+    shadowOpacity: 0.1,
+    shadowRadius: 3,
   },
   chartTitle: {
     fontSize: 18,
     fontWeight: 'bold',
     color: '#1E3A8A',
     textAlign: 'center',
-    marginVertical: 12,
+    marginBottom: 3,
+  },
+  yAxisLabels: {
+    width: 40,
+    height: 200,
+    justifyContent: 'space-between',
+    paddingVertical: 8,
+    marginRight:5,
+    
+    
+  },
+  yAxisLabelText: {
+    fontSize: 16,
+    color: '#334155',
+    textAlign: 'right',
+  },
+  labelContainer: {
+    flexDirection: 'row',
+    justifyContent: 'center',
+    alignItems: 'flex-start',
+    // marginTop: 4,
+    // marginBottom: 1,
+  },
+  labelItem: {
+    width: 60,
+    alignItems: 'center',
+  },
+  labelText: {
+    fontSize: 10,
+    fontWeight: '900',
+    color: '#1e293b',
+    textAlign: 'center',
+  },
+  labelSubText: {
+    fontSize: 10,
+    color: '#6b7280',
+    textAlign: 'center',
   },
   paginationContainer: {
     flexDirection: 'row',
     justifyContent: 'center',
     alignItems: 'center',
-    marginVertical: 16,
+    marginVertical: 10,
     gap: 16,
   },
-  pageText: { fontSize: 16, fontWeight: '600', color: '#1E3A8A' },
-  labelContainer: {
-    flexDirection: 'row',
-    justifyContent: 'center',
-    alignItems: 'flex-start',
-    marginTop: 4,
-    marginBottom: 12,
-  },
-  labelItem: {
-    width: pointWidth,
-    alignItems: 'center',
-  },
-  labelText: {
-    fontSize: 10,
+  pageText: {
+    fontSize: 16,
     fontWeight: '600',
-    color: '#1e293b',
-    textAlign: 'center',
-  },
-  labelSubText: {
-    fontSize: 9,
-    color: '#6b7280',
-    textAlign: 'center',
-  },
-  yAxisLabels: {
-    width: 40,
-    height: 260,
-    justifyContent: 'space-between',
-    paddingVertical: 8,
-  },
-  yAxisLabelText: {
-    fontSize: 12,
-    color: '#334155',
-    textAlign: 'right',
+    color: '#1E3A8A',
   },
 });
 
 export default MachineStatusGraph;
-
-
 
 
 
