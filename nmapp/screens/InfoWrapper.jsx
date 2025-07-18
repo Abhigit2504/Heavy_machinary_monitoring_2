@@ -8,7 +8,7 @@ import {
   Dimensions,
   ActivityIndicator,
   Animated,
-  Alert,
+  Easing,
 } from 'react-native';
 import axios from 'axios';
 import { LineChart } from 'react-native-chart-kit';
@@ -18,11 +18,9 @@ import utc from 'dayjs/plugin/utc';
 import timezone from 'dayjs/plugin/timezone';
 import DateTimePickerModal from 'react-native-modal-datetime-picker';
 import { useNavigation } from '@react-navigation/native';
-import { Easing } from 'react-native';
 import CustomDonutChartWithLegend from '../components/CustomDonutChartWithLegend';
 import { BASE_URL } from '../config';
 import { recordVisit } from '../api/LogsApi';
-
 
 const screenWidth = Dimensions.get('window').width;
 const MAX_POINTS_PER_PAGE = 50;
@@ -31,46 +29,122 @@ const pointWidth = 60;
 dayjs.extend(utc);
 dayjs.extend(timezone);
 
-const CustomBarChart = ({ data }) => {
-  const barHeights = useRef(data.map(() => new Animated.Value(0))).current;
+const PaginatedGraph = React.memo(({ records, gfrid, pageState, setPageState, fadeAnim }) => {
+  const page = pageState[gfrid] || 0;
+  const totalPages = Math.ceil(records.length / MAX_POINTS_PER_PAGE);
+  const currentData = records.slice(page * MAX_POINTS_PER_PAGE, (page + 1) * MAX_POINTS_PER_PAGE);
+  const chartWidth = Math.max(currentData.length * pointWidth, screenWidth);
 
-  useEffect(() => {
-    const animations = data.map((_, i) =>
-      Animated.timing(barHeights[i], {
-        toValue: data[i].value,
-        duration: 600,
-        delay: i * 120,
-        useNativeDriver: false,
-      })
-    );
-    Animated.stagger(100, animations).start();
-  }, [data]);
-  
+  const graphScrollRef = useRef();
+  const labelScrollRef = useRef();
+
+  const animatePageChange = async () => {
+    fadeAnim.setValue(0.3);
+    await Animated.timing(fadeAnim, {
+      toValue: 1,
+      duration: 300,
+      useNativeDriver: true,
+    }).start();
+  };
+
+const formattedLabels = currentData.map(({ start_time }) => {
+  const time = dayjs(start_time).tz('Asia/Kolkata').format('HH:mm');
+  const date = dayjs(start_time).tz('Asia/Kolkata').format('DD/MM');
+  return `${time}\n${date}`;
+});
+
 
   return (
-    <ScrollView
-      horizontal
-      contentContainerStyle={{ paddingVertical: 20, paddingHorizontal: 10 }}
-      showsHorizontalScrollIndicator={false}
-    >
-      {data.map((item, i) => (
-        <View key={i} style={{ alignItems: 'center', marginHorizontal: 10 }}>
-          <Animated.View
-            style={{
-              height: barHeights[i].interpolate({
-                inputRange: [0, 100],
-                outputRange: [0, 180],
-              }),
-            
-            }}
-          />
-          <Text style={{ fontSize: 12, marginTop: 6, color: '#1F2937' }}>{item.label}</Text>
-          <Text style={{ fontSize: 12, color: '#475569' }}>{item.value}%</Text>
+    <Animated.View style={{ opacity: fadeAnim }}>
+      <ScrollView 
+        horizontal 
+        showsHorizontalScrollIndicator={false}
+        ref={graphScrollRef}
+        onScroll={(e) => {
+          labelScrollRef.current?.scrollTo({
+            x: e.nativeEvent.contentOffset.x,
+            animated: false
+          });
+        }}
+        scrollEventThrottle={16}
+      >
+        <LineChart
+          data={{
+            labels: formattedLabels,
+            datasets: [{ data: currentData.map((r) => r.status) }],
+          }}
+          width={chartWidth}
+          height={240}
+          fromZero
+          withDots
+          withInnerLines
+          withOuterLines
+          withVerticalLabels={true}
+          withHorizontalLabels={true}
+          chartConfig={{
+            backgroundGradientFrom: '#aeecee',
+            backgroundGradientTo: '#fff',
+            marginBottom:20,
+            borderRadius:20,
+            color: () => 'black',
+            labelColor: () => 'black',
+            decimalPlaces: 0,
+            propsForLabels: {
+              fontSize: 9,
+              fontWeight: 'bold',
+              rotation: 45,
+            },
+            propsForDots: {
+              r: '3',
+              strokeWidth: '1',
+              stroke: '#1E3A8A',
+            },
+          }}
+        
+        />
+      </ScrollView>
+
+      <View style={styles.paginationRow}>
+        <TouchableOpacity
+          disabled={page === 0}
+          onPress={async () => {
+            await animatePageChange();
+            setPageState((prev) => ({ ...prev, [gfrid]: Math.max(prev[gfrid] - 1, 0) }));
+          }}>
+          <Ionicons name="chevron-back-circle" size={30} color={page === 0 ? '#ccc' : '#1E3A8A'} />
+        </TouchableOpacity>
+
+        <View style={{ flexDirection: 'row', alignItems: 'center' }}>
+          {[...Array(totalPages)].map((_, idx) => (
+            <View
+              key={idx}
+              style={{
+                width: 8,
+                height: 8,
+                borderRadius: 4,
+                marginHorizontal: 4,
+                backgroundColor: idx === page ? '#1E3A8A' : '#ccc',
+              }}
+            />
+          ))}
         </View>
-      ))}
-    </ScrollView>
+
+        <TouchableOpacity
+          disabled={page === totalPages - 1}
+          onPress={async () => {
+            await animatePageChange();
+            setPageState((prev) => ({
+              ...prev,
+              [gfrid]: Math.min((prev[gfrid] || 0) + 1, totalPages - 1),
+            }));
+          }}>
+          <Ionicons name="chevron-forward-circle" size={30} color={page === totalPages - 1 ? '#ccc' : '#1E3A8A'} />
+        </TouchableOpacity>
+      </View>
+    </Animated.View>
   );
-};
+});
+
 
 const InfoWrapper = () => {
   const [priorityUsage, setPriorityUsage] = useState([]);
@@ -82,33 +156,20 @@ const InfoWrapper = () => {
   const [showFromPicker, setShowFromPicker] = useState(false);
   const [showToPicker, setShowToPicker] = useState(false);
   const [pageState, setPageState] = useState({});
-  const chartAnim = useRef(new Animated.Value(0)).current;
   const navigation = useNavigation();
 
-  useEffect(() => {
-  recordVisit("InfoWrapper", {
-    range,
-    fromDate: fromDate ? fromDate.toISOString() : null,
-    toDate: toDate ? toDate.toISOString() : null,
-  });
-}, []);
+  const chartAnim = useRef(new Animated.Value(1)).current;
+  const fadeAnim = useRef(new Animated.Value(1)).current;
 
-  const checkAndRedirectHeavyLoad = (from, to) => {
-    const diffInDays = dayjs(to).diff(dayjs(from), 'day');
-    if (diffInDays > 31) {
-      Alert.alert(
-        '⚠ Heavy Load',
-        'The selected range is more than 1 month. Please download the data report.',
-        [{ text: 'Go to Download', onPress: () => navigation.navigate('DownloadScreen') }]
-      );
-      return true;
-    }
-    return false;
-  };
+  useEffect(() => {
+    recordVisit('InfoWrapper', {
+      range,
+      fromDate: fromDate ? fromDate.toISOString() : null,
+      toDate: toDate ? toDate.toISOString() : null,
+    });
+  }, []);
 
   const fetchPieAndMachines = async (customFrom, customTo) => {
-    if (checkAndRedirectHeavyLoad(customFrom, customTo)) return;
-
     try {
       setLoading(true);
       const params = {
@@ -194,73 +255,6 @@ const InfoWrapper = () => {
     });
   };
 
-  const renderPaginatedGraph = (records, gfrid) => {
-    const page = pageState[gfrid] || 0;
-    const totalPages = Math.ceil(records.length / MAX_POINTS_PER_PAGE);
-    const currentData = records.slice(page * MAX_POINTS_PER_PAGE, (page + 1) * MAX_POINTS_PER_PAGE);
-    const chartWidth = Math.max(currentData.length * pointWidth, screenWidth);
-
-    return (
-      <>
-        <Animated.View style={{ transform: [{ scale: chartAnim }], opacity: chartAnim }}>
-          <ScrollView horizontal showsHorizontalScrollIndicator={false}>
-            <LineChart
-              data={{
-                labels: [],
-                datasets: [{ data: currentData.map((r) => r.status) }],
-              }}
-              width={chartWidth}
-              height={180}
-              fromZero
-              withDots={false}
-              withInnerLines
-              withVerticalLabels={false}
-              chartConfig={{
-                backgroundGradientFrom: '#fff',
-                backgroundGradientTo: '#fff',
-                color: () => '#1E3A8A',
-                labelColor: () => '#334155',
-                decimalPlaces: 0,
-              }}
-            />
-          </ScrollView>
-        </Animated.View>
-
-        <View style={styles.labelRow}>
-          {currentData.map(({ start_time }, idx) => {
-            const time = dayjs(start_time).tz('Asia/Kolkata').format('HH:mm');
-            const date = dayjs(start_time).tz('Asia/Kolkata').format('DD/MM');
-            return (
-              <View key={idx} style={styles.labelItem}>
-                <Text style={styles.labelText}>{time}</Text>
-                <Text style={styles.labelSubText}>{date}</Text>
-              </View>
-            );
-          })}
-        </View>
-
-        <View style={styles.paginationRow}>
-          <TouchableOpacity
-            disabled={page === 0}
-            onPress={() =>
-              setPageState((prev) => ({ ...prev, [gfrid]: Math.max(prev[gfrid] - 1, 0) }))}>
-            <Ionicons name="chevron-back-circle" size={30} color={page === 0 ? '#ccc' : '#1E3A8A'} />
-          </TouchableOpacity>
-          <Text style={styles.pageText}>{`Page ${page + 1} of ${totalPages}`}</Text>
-          <TouchableOpacity
-            disabled={page === totalPages - 1}
-            onPress={() =>
-              setPageState((prev) => ({
-                ...prev,
-                [gfrid]: Math.min((prev[gfrid] || 0) + 1, totalPages - 1),
-              }))}>
-            <Ionicons name="chevron-forward-circle" size={30} color={page === totalPages - 1 ? '#ccc' : '#1E3A8A'} />
-          </TouchableOpacity>
-        </View>
-      </>
-    );
-  };
-
   if (loading) {
     return (
       <View style={styles.loadingContainer}>
@@ -271,7 +265,6 @@ const InfoWrapper = () => {
 
   return (
     <ScrollView style={styles.container}>
-      {/* Range Buttons */}
       <View style={styles.rangeButtons}>
         {['1d', '1w', '1m', 'custom'].map((opt) => (
           <TouchableOpacity
@@ -294,15 +287,13 @@ const InfoWrapper = () => {
         ))}
         <TouchableOpacity
           onPress={() => navigation.navigate('DownloadScreen')}
-          style={[styles.rangeBtn, { backgroundColor: '#7ce846' }]}
-        >
+          style={[styles.rangeBtn, { backgroundColor: '#7ce846' }]}>
           <Text style={{ color: 'black', fontWeight: 'bold' }}>
             <Ionicons name="cloud-download-outline" size={16} /> Download
           </Text>
         </TouchableOpacity>
       </View>
 
-      {/* Time Range Info */}
       {fromDate && toDate && (
         <View style={styles.timeCard}>
           <Text style={styles.timeTitle}><Ionicons name="calendar" size={18} /> Selected Time Range</Text>
@@ -311,25 +302,35 @@ const InfoWrapper = () => {
         </View>
       )}
 
-      {/* Bar Chart */}
       {priorityUsage.length > 0 && (
         <Animated.View style={[styles.chartCard, { transform: [{ scale: chartAnim }], opacity: chartAnim }]}>
-          <Text style={styles.chartTitle}>Overall</Text>
+          <Text style={styles.chartTitle}>Overall Machine Usage</Text>
           <CustomDonutChartWithLegend data={getBarChartData()} />
         </Animated.View>
       )}
 
-      {/* Machine Data Cards */}
       {machineData.map((machine) => (
         <View key={machine.gfrid} style={styles.machineCard}>
-          <Text style={styles.machineTitle}>GFRID: {machine.gfrid}</Text>
-          {machine.status_records.length > 0
-            ? renderPaginatedGraph(machine.status_records, machine.gfrid)
-            : <Text style={{ color: '#999' }}>No status records available.</Text>}
+          
+          <Text style={styles.machineTitle}>
+             <Ionicons 
+                name="hardware-chip-outline" 
+                size={18} 
+              />GFRID: {machine.gfrid}</Text>
+          {machine.status_records.length > 0 ? (
+            <PaginatedGraph
+              records={machine.status_records}
+              gfrid={machine.gfrid}
+              pageState={pageState}
+              setPageState={setPageState}
+              fadeAnim={fadeAnim}
+            />
+          ) : (
+            <Text style={{ color: '#999' }}>No status records available.</Text>
+          )}
         </View>
       ))}
 
-      {/* Date Pickers */}
       <DateTimePickerModal
         isVisible={showFromPicker}
         mode="datetime"
@@ -350,42 +351,13 @@ const InfoWrapper = () => {
 };
 
 const styles = StyleSheet.create({
-  container: {
-    flex: 1,
-    padding: 16,
-    backgroundColor: '#F0F4F8',
-  },
-  loadingContainer: {
-    flex: 1,
-    justifyContent: 'center',
-    alignItems: 'center',
-    backgroundColor: '#F1F5F9',
-  },
-  rangeButtons: {
-    flexDirection: 'row',
-    justifyContent: 'center',
-    marginBottom: 16,
-    flexWrap: 'wrap',
-    gap: 10,
-  },
-  rangeBtn: {
-    paddingVertical: 8,
-    paddingHorizontal: 18,
-    borderRadius: 20,
-    backgroundColor: '#E2E8F0',
-    elevation: 2,
-  },
-  rangeBtnActive: {
-    backgroundColor: '#1E3A8A',
-  },
-  rangeText: {
-    color: '#1E293B',
-    fontWeight: '600',
-    fontSize: 14,
-  },
-  rangeTextActive: {
-    color: '#FFFFFF',
-  },
+  container: { flex: 1, padding: 16, backgroundColor: '#F0F4F8' },
+  loadingContainer: { flex: 1, justifyContent: 'center', alignItems: 'center', backgroundColor: '#F1F5F9' },
+  rangeButtons: { flexDirection: 'row', justifyContent: 'center', flexWrap: 'wrap', gap: 10, marginBottom: 16 },
+  rangeBtn: { paddingVertical: 8, paddingHorizontal: 18, borderRadius: 20, backgroundColor: '#E2E8F0', elevation: 2 },
+  rangeBtnActive: { backgroundColor: '#1E3A8A' },
+  rangeText: { color: '#1E293B', fontWeight: '600', fontSize: 14 },
+  rangeTextActive: { color: '#FFFFFF' },
   timeCard: {
     backgroundColor: '#FFFFFF',
     padding: 14,
@@ -395,19 +367,8 @@ const styles = StyleSheet.create({
     borderLeftWidth: 4,
     borderLeftColor: '#1E40AF',
   },
-  timeTitle: {
-    fontSize: 16,
-    fontWeight: 'bold',
-    marginBottom: 10,
-    color: '#1E293B',
-    textAlign: 'center',
-  },
-  timeRange: {
-    fontSize: 14,
-    color: '#475569',
-    textAlign: 'center',
-    marginBottom: 2,
-  },
+  timeTitle: { fontSize: 16, fontWeight: 'bold', marginBottom: 10, color: '#1E293B', textAlign: 'center' },
+  timeRange: { fontSize: 14, color: '#475569', textAlign: 'center', marginBottom: 2 },
   chartCard: {
     backgroundColor: '#FFFFFF',
     padding: 20,
@@ -419,13 +380,7 @@ const styles = StyleSheet.create({
     shadowOpacity: 0.2,
     shadowRadius: 6,
   },
-  chartTitle: {
-    fontSize: 20,
-    fontWeight: '700',
-    marginBottom: 16,
-    color: '#1E3A8A',
-    textAlign: 'center',
-  },
+  chartTitle: { fontSize: 20, fontWeight: '700', marginBottom: 16, color: '#1E3A8A', textAlign: 'center' },
   machineCard: {
     backgroundColor: '#FFFFFF',
     padding: 18,
@@ -437,73 +392,26 @@ const styles = StyleSheet.create({
     shadowOpacity: 0.15,
     shadowRadius: 5,
   },
-  machineTitle: {
-    fontSize: 18,
-    fontWeight: 'bold',
-    color: '#0F172A',
-    marginBottom: 10,
-    textAlign: 'center',
-  },
-  labelRow: {
+  machineTitle: { fontSize: 18, fontWeight: 'bold', color: '#0F172A', marginBottom: 10, textAlign: 'center' },
+  labelRow: { 
     flexDirection: 'row',
-    flexWrap: 'nowrap',
-    marginTop: 10,
-
-    marginBottom: 10,
+    paddingTop: 10,
+    paddingBottom: 10,
   },
-  labelItem: {
-    width: pointWidth,
+  labelItem: { 
+    width: pointWidth, 
     alignItems: 'center',
+    justifyContent: 'center',
   },
-  labelText: {
-    fontSize: 10,
-    fontWeight: '600',
-    color: '#1e293b',
-    textAlign: 'center',
-  },
-  labelSubText: {
-    fontSize: 9,
-    color: '#6b7280',
-    textAlign: 'center',
-  },
+  labelText: { fontSize: 10, fontWeight: '600', color: '#1e293b', textAlign: 'center' },
+  labelSubText: { fontSize: 9, color: '#6b7280', textAlign: 'center' },
   paginationRow: {
     flexDirection: 'row',
-    justifyContent: 'center',
-    alignItems: 'center',
+    justifyContent: 'space-between',
     marginTop: 12,
-    gap: 16,
+    paddingHorizontal: 20,
+    alignItems: 'center',
   },
-  pageText: {
-    fontSize: 14,
-    fontWeight: '600',
-    color: '#1E3A8A',
-  },
-  pieRow: {
-  flexDirection: 'row',
-  alignItems: 'center',
-  justifyContent: 'space-between',
-},
-pieLegend: {
-  flex: 1,
-  paddingLeft: 10,
-  justifyContent: 'center',
-},
-legendItem: {
-  flexDirection: 'row',
-  alignItems: 'center',
-  marginBottom: 8,
-},
-legendColorBox: {
-  width: 14,
-  height: 14,
-  borderRadius: 3,
-  marginRight: 8,
-},
-legendLabel: {
-  fontSize: 13,
-  color: '#1E293B',
-},
-
 });
 
 export default InfoWrapper;

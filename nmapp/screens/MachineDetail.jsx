@@ -23,6 +23,7 @@ import MachineStatusGraph from "../components/MachineStatusGraph";
 import MovementAnalysisGraph from "../components/MovementAnalysisGraph";
 import CumulativeAnalysisGraph from "../components/CumulativeAnalysisGraph";
 import { logPageVisit } from '../api/LogsApi';
+import { BASE_URL } from "../config";
 
 const Tab = createMaterialTopTabNavigator();
 
@@ -243,7 +244,7 @@ const GfridScroller = ({ currentGfrid, fromDate, toDate, range }) => {
   const navigation = useNavigation();
 
   useEffect(() => {
-    fetch("http://192.168.1.4:8000/api/machines/")
+    fetch(`${BASE_URL}/api/machines/`)
       .then((res) => res.json())
       .then((data) => setGfrids(data))
       .catch((err) => console.error("GFRID Fetch Error", err));
