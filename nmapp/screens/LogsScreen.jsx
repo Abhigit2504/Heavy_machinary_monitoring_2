@@ -9,6 +9,7 @@ import {
   Modal,
   Dimensions,
   Animated,
+  RefreshControl
 } from 'react-native';
 import {
   fetchLogs,
@@ -21,17 +22,21 @@ const LogsScreen = () => {
   const [logsByDate, setLogsByDate] = useState({});
   const [selectedLog, setSelectedLog] = useState(null);
   const [isModalVisible, setModalVisible] = useState(false);
+  const [isRefreshing, setIsRefreshing] = useState(false);
 
   useEffect(() => {
     loadLogs();
   }, []);
 
   const loadLogs = async () => {
+    setIsRefreshing(true);
     try {
       const logs = await fetchLogs();
       setLogsByDate(logs);
     } catch (err) {
       console.error('Error fetching logs:', err);
+    } finally {
+      setIsRefreshing(false);
     }
   };
 
@@ -63,10 +68,8 @@ const LogsScreen = () => {
     setModalVisible(false);
   };
 
- const formatDuration = (start, end, log) => {
-  if (!end || log.active) return 'Active Session';
-
-
+  const formatDuration = (start, end, log) => {
+    if (!end || log.active) return 'Active Session';
     
     const diff = Math.abs(new Date(end) - new Date(start));
     const days = Math.floor(diff / (1000 * 60 * 60 * 24));
@@ -78,30 +81,40 @@ const LogsScreen = () => {
   };
 
   const renderVisit = (visit, i) => (
-    <View key={i} style={styles.visit}>
-      <Text style={styles.visitText}><Ionicons name="arrow-forward-circle" size={14} /> {visit.page_name}</Text>
+    <Animatable.View 
+      key={i} 
+      style={styles.visit}
+      animation="fadeInRight"
+      duration={600}
+      delay={i * 100}
+    >
+      <View style={styles.visitHeader}>
+        <Ionicons name="arrow-forward" size={18} color="#4A6FA5" />
+        <Text style={styles.visitText}>{visit.page_name}</Text>
+      </View>
       <Text style={styles.timestampText}>Visited at: {new Date(visit.visited_at).toLocaleString()}</Text>
       {visit.filters_applied && Object.keys(visit.filters_applied).length > 0 && (
         <View style={styles.filtersBox}>
-          <Text style={styles.filtersTitle}>Filters:</Text>
+          <Text style={styles.filtersTitle}>FILTERS APPLIED</Text>
           {Object.entries(visit.filters_applied).map(([key, value]) => (
-            <Text key={key} style={styles.filtersText}>
-              • {key}: {typeof value === 'object' ? JSON.stringify(value) : value}
-            </Text>
+            <View key={key} style={styles.filterItem}>
+              <Ionicons name="options" size={12} color="#666" />
+              <Text style={styles.filtersText}>
+                {key}: {typeof value === 'object' ? JSON.stringify(value) : value}
+              </Text>
+            </View>
           ))}
         </View>
       )}
-    </View>
+    </Animatable.View>
   );
 
   const Timeline = ({ log }) => {
     const animValue = new Animated.Value(0);
-    const lineWidth = Dimensions.get('window').width - 80; // Adjusted to prevent overflow
+    const lineWidth = Dimensions.get('window').width - 100;
     
     useEffect(() => {
       if (log.active || !log.logout_time) {
- 
-        // Active session - pulse animation in the middle
         Animated.loop(
           Animated.sequence([
             Animated.timing(animValue, {
@@ -117,7 +130,6 @@ const LogsScreen = () => {
           ])
         ).start();
       } else {
-        // Completed session - slide from left to right
         Animated.timing(animValue, {
           toValue: 1,
           duration: 2000,
@@ -128,40 +140,49 @@ const LogsScreen = () => {
 
     const translateX = animValue.interpolate({
       inputRange: [0, 1],
-      outputRange: [0, lineWidth - 20], // Adjusted to stay within container
+      outputRange: [0, lineWidth - 20],
     });
 
     const scale = animValue.interpolate({
       inputRange: [0, 0.5, 1],
-      outputRange: [1, 1.2, 1],
+      outputRange: [1, 1.3, 1],
     });
 
     return (
       <View style={styles.timelineWrapper}>
         <View style={styles.timelineRow}>
-          <View style={[styles.timelineNode, styles.startNode]} />
+          <View style={[styles.timelineNode, styles.startNode]}>
+            <Ionicons name="log-in" size={12} color="white" />
+          </View>
           <View style={styles.timelineLineContainer}>
             <View style={[styles.timelineLine, !log.logout_time && styles.timelineLinePartial]} />
             <Animated.View 
               style={[
                 styles.animatedCircle,
                 { 
-                  backgroundColor: log.logout_time ? '#FF0000' : '#FFD700',
+                  backgroundColor: log.logout_time ? '#FF6B6B' : '#FFD700',
                   transform: [
                     { translateX: log.logout_time ? translateX : lineWidth / 2 - 10 },
                     { scale: !log.logout_time ? scale : 1 }
                   ],
                 }
               ]}
-            />
+            >
+              {!log.logout_time && (
+                <Ionicons name="pulse" size={10} color="#000" />
+              )}
+            </Animated.View>
           </View>
-          {log.logout_time && <View style={[styles.timelineNode, styles.endNode]} />}
+          {log.logout_time && (
+            <View style={[styles.timelineNode, styles.endNode]}>
+              <Ionicons name="log-out" size={12} color="white" />
+            </View>
+          )}
         </View>
         <View style={styles.timelineLabels}>
           <Text style={styles.timelineLabel}>{new Date(log.login_time).toLocaleTimeString()}</Text>
           <Text style={styles.timelineDuration}>
             {formatDuration(log.login_time, log.logout_time, log)}
-
           </Text>
           <Text style={styles.timelineLabel}>
             {log.logout_time ? new Date(log.logout_time).toLocaleTimeString() : ''}
@@ -172,168 +193,310 @@ const LogsScreen = () => {
   };
 
   const renderLog = (log, index) => (
-    <Animatable.View animation="fadeInUp" duration={600} delay={index * 100} key={log.id}>
-      <TouchableOpacity onPress={() => openLogModal(log)} activeOpacity={0.9}>
-        <View style={[styles.logCard, log.active && { borderColor: '#FFD700', borderWidth: 2 }]}>
-          <View style={styles.logHeader}>
+    <Animatable.View 
+      animation="fadeInUp" 
+      duration={600} 
+      delay={index * 100} 
+      key={log.id}
+      style={styles.logCardContainer}
+    >
+      <TouchableOpacity 
+        onPress={() => openLogModal(log)} 
+        activeOpacity={0.8}
+        style={[
+          styles.logCard, 
+          log.active && styles.activeLogCard
+        ]}
+      >
+        <View style={styles.logHeader}>
+          <View style={styles.logHeaderLeft}>
+            <Ionicons 
+              name={log.active ? "wifi" : "wifi-outline"} 
+              size={16} 
+              color={log.active ? "#4CAF50" : "#F44336"} 
+            />
             <Text style={styles.sessionText}>
-              <Ionicons name="laptop-outline" size={14} /> {log.ip_address} | {log.device_info}
+              {log.ip_address} | {log.device_info}
             </Text>
-            <TouchableOpacity onPress={() => handleDeleteLog(log.id)}>
-              <Ionicons name="trash-outline" size={20} color="red" />
-            </TouchableOpacity>
           </View>
-          <Timeline log={log} />
-          <Text style={styles.sectionTitle}>Visited Pages: {log.visits.length}</Text>
+          <TouchableOpacity 
+            onPress={(e) => {
+              e.stopPropagation();
+              handleDeleteLog(log.id);
+            }}
+            style={styles.deleteButton}
+          >
+            <Ionicons name="trash" size={20} color="#FF6B6B" />
+          </TouchableOpacity>
+        </View>
+        <Timeline log={log} />
+        <View style={styles.visitsCount}>
+          <Ionicons name="document-text" size={16} color="#4A6FA5" />
+          <Text style={styles.visitsCountText}>Visited {log.visits.length} page{log.visits.length !== 1 ? 's' : ''}</Text>
         </View>
       </TouchableOpacity>
     </Animatable.View>
   );
 
   return (
-    <ScrollView style={styles.container}>
-      <Text style={styles.heading}><Ionicons name="analytics-outline" size={22} /> User Logs (Last 30 Days)</Text>
-      {Object.keys(logsByDate).length === 0 ? (
-        <Text style={styles.noLogs}>No logs found.</Text>
-      ) : (
-        Object.entries(logsByDate).map(([date, logs]) => (
-          <View key={date} style={styles.dateGroup}>
-            <Text style={styles.dateText}><Ionicons name="calendar" size={16} /> {date}</Text>
-            {logs.map(renderLog)}
+    <View style={styles.container}>
+      <View style={styles.header}>
+        <Text style={styles.heading}>
+          <Ionicons name="analytics" size={24} color="#FFF" /> User Activity Logs
+        </Text>
+        <Text style={styles.subHeading}>Last 30 Days</Text>
+      </View>
+      
+      <ScrollView 
+        style={styles.scrollContainer}
+        refreshControl={
+          <RefreshControl
+            refreshing={isRefreshing}
+            onRefresh={loadLogs}
+            colors={['#4A6FA5']}
+            tintColor="#4A6FA5"
+          />
+        }
+      >
+        {Object.keys(logsByDate).length === 0 ? (
+          <View style={styles.noLogsContainer}>
+            <Ionicons name="file-tray" size={48} color="#CCC" />
+            <Text style={styles.noLogs}>No activity logs found</Text>
+            <TouchableOpacity onPress={loadLogs} style={styles.refreshButton}>
+              <Ionicons name="refresh" size={20} color="black" />
+              <Text style={styles.refreshText}>Refresh</Text>
+            </TouchableOpacity>
           </View>
-        ))
-      )}
-
-      <Modal
-  visible={isModalVisible}
-  animationType="fade"
-  transparent={true}
-  onRequestClose={closeLogModal}
->
-  <View style={styles.modalBackground}>
-    <Animatable.View animation="zoomIn" duration={400} style={styles.modalContent}>
-      {/* Close Button */}
-      <TouchableOpacity onPress={closeLogModal} style={styles.modalCloseButton}>
-        <Ionicons name="close-circle" size={28} color="#333" />
-      </TouchableOpacity>
-
-      <ScrollView>
-        <Text style={styles.modalTitle}><Ionicons name="document-text-outline" size={20} /> Session Details</Text>
-        <Text style={styles.modalSubtitle}>IP: {selectedLog?.ip_address} | Device: {selectedLog?.device_info}</Text>
-        <Text style={styles.modalText}>Login: {new Date(selectedLog?.login_time).toLocaleString()}</Text>
-        {selectedLog?.logout_time && (
-          <Text style={styles.modalText}>Logout: {new Date(selectedLog.logout_time).toLocaleString()}</Text>
-        )}
-
-        <Text style={styles.sectionTitle}>Pages Visited</Text>
-        {selectedLog?.visits?.length > 0 ? (
-          selectedLog.visits.map(renderVisit)
         ) : (
-          <Text style={styles.noVisits}>No visits found.</Text>
+          Object.entries(logsByDate).map(([date, logs]) => {
+  const d = new Date(date);
+  const monthNames = ["Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul", "Aug", "Sep", "Oct", "Nov", "Dec"];
+  const formattedDate = `${d.getFullYear()}:${monthNames[d.getMonth()]}:${d.getDate().toString().padStart(2, '0')}`;
+
+  return (
+    <View key={date} style={styles.dateGroup}>
+      <View style={styles.dateHeader}>
+        <Ionicons name="calendar" size={18} color="black" />
+        <Text style={styles.dateText}>{formattedDate}</Text>
+      </View>
+      {logs.map(renderLog)}
+    </View>
+  );
+})
         )}
       </ScrollView>
-    </Animatable.View>
-  </View>
-</Modal>
 
-    </ScrollView>
+      <Modal
+        visible={isModalVisible}
+        animationType="slide"
+        transparent={false}
+        onRequestClose={closeLogModal}
+      >
+        <View style={styles.modalContainer}>
+          <View style={styles.modalHeader}>
+            <Text style={styles.modalTitle}>Session Details</Text>
+            <TouchableOpacity onPress={closeLogModal} style={styles.modalCloseButton}>
+              <Ionicons name="close" size={28} color="#FFF" />
+            </TouchableOpacity>
+          </View>
+          
+          <ScrollView style={styles.modalScroll}>
+            <View style={styles.sessionInfo}>
+              <View style={styles.infoRow}>
+                <Ionicons name="time" size={18} color="#4A6FA5" />
+                <Text style={styles.infoText}>
+                  Login: {new Date(selectedLog?.login_time).toLocaleString()}
+                </Text>
+              </View>
+              
+              {selectedLog?.logout_time && (
+                <View style={styles.infoRow}>
+                  <Ionicons name="time" size={18} color="#4A6FA5" />
+                  <Text style={styles.infoText}>
+                    Logout: {new Date(selectedLog.logout_time).toLocaleString()}
+                  </Text>
+                </View>
+              )}
+              
+              <View style={styles.infoRow}>
+                <Ionicons name="desktop" size={18} color="#4A6FA5" />
+                <Text style={styles.infoText}>Device: {selectedLog?.device_info}</Text>
+              </View>
+              
+              <View style={styles.infoRow}>
+                <Ionicons name="globe" size={18} color="#4A6FA5" />
+                <Text style={styles.infoText}>IP: {selectedLog?.ip_address}</Text>
+              </View>
+              
+              <View style={styles.infoRow}>
+                <Ionicons name="hourglass" size={18} color="#4A6FA5" />
+                <Text style={styles.infoText}>
+                  Duration: {formatDuration(selectedLog?.login_time, selectedLog?.logout_time, selectedLog)}
+                </Text>
+              </View>
+            </View>
+            
+            <View style={styles.visitsSection}>
+              <View style={styles.sectionHeader}>
+                <Ionicons name="document-text" size={20} color="#4A6FA5" />
+                <Text style={styles.sectionTitle}>Pages Visited ({selectedLog?.visits?.length || 0})</Text>
+              </View>
+              
+              {selectedLog?.visits?.length > 0 ? (
+                selectedLog.visits.map(renderVisit)
+              ) : (
+                <View style={styles.noVisitsContainer}>
+                  <Ionicons name="folder-open" size={32} color="#CCC" />
+                  <Text style={styles.noVisitsText}>No page visits recorded</Text>
+                </View>
+              )}
+            </View>
+          </ScrollView>
+        </View>
+      </Modal>
+    </View>
   );
 };
 
 const styles = StyleSheet.create({
-  container: { flex: 1, padding: 16, backgroundColor: '#FAFAFA',
-    marginTop:40
-   },
-  heading: { fontSize: 22, fontWeight: 'bold', marginBottom: 16, textAlign: 'center', color: '#000' },
-  dateGroup: { marginBottom: 24 },
-  dateText: { fontSize: 16, fontWeight: '600', color: '#000', marginBottom: 8 },
-  logCard: {
-    backgroundColor: '#cfdfe3',
-    borderRadius: 12,
-    padding: 14,
+  container: {
+    flex: 1,
+    backgroundColor: '#F8F9FA',
+  },
+  header: {
+    backgroundColor: '#4A6FA5',
+    paddingVertical: 10,
+    paddingHorizontal: 8,
+    borderBottomLeftRadius: 20,
+    borderBottomRightRadius: 20,
+    marginBottom: 3,
+    shadowColor: '#000',
+    shadowOffset: { width: 0, height: 4 },
+    shadowOpacity: 0.1,
+    shadowRadius: 6,
+    elevation: 5,
+  },
+  heading: {
+    fontSize: 24,
+    fontWeight: 'bold',
+    color: '#FFF',
+    textAlign: 'center',
+  },
+  subHeading: {
+    fontSize: 16,
+    color: 'rgba(255,255,255,0.8)',
+    textAlign: 'center',
+    marginTop: 4,
+  },
+  scrollContainer: {
+    flex: 1,
+    paddingHorizontal: 16,
+  },
+  dateGroup: {
+    marginBottom: 24,
+  },
+  dateHeader: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    marginBottom: 12,
+    paddingVertical: 8,
+    borderBottomWidth: 1,
+    borderBottomColor: '#E0E0E0',
+  },
+  dateText: {
+    fontSize: 18,
+    fontWeight: '600',
+    color: '#000000ff',
+    marginLeft: 8,
+  },
+  logCardContainer: {
     marginBottom: 16,
     shadowColor: '#000',
-    shadowOpacity: 0.05,
-    shadowRadius: 5,
+    shadowOffset: { width: 0, height: 2 },
+    shadowOpacity: 0.1,
+    shadowRadius: 4,
     elevation: 3,
+  },
+  logCard: {
+    backgroundColor: '#FFF',
+    borderRadius: 12,
+    padding: 16,
+    borderWidth: 1,
+    borderColor: '#E0E0E0',
+  },
+  activeLogCard: {
+    borderColor: '#FFD700',
+    borderWidth: 2,
+    backgroundColor: '#FFFDF0',
+  },
+  logHeader: {
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+    alignItems: 'center',
+    marginBottom: 12,
+  },
+  logHeaderLeft: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    flex: 1,
+  },
+  sessionText: {
+    fontSize: 14,
+    color: '#333',
+    marginLeft: 8,
+  },
+  deleteButton: {
+    padding: 4,
+    borderRadius: 20,
+    backgroundColor: 'rgba(255,107,107,0.1)',
+  },
+  visitsCount: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    marginTop: 12,
+    paddingTop: 8,
+    borderTopWidth: 1,
+    borderTopColor: '#EEE',
+  },
+  visitsCountText: {
+    fontSize: 13,
+    color: '#4A6FA5',
+    marginLeft: 8,
+    fontWeight: '500',
+  },
+  timelineWrapper: {
+    backgroundColor: '#FFF',
+    borderRadius: 12,
+    padding: 16,
+    marginVertical: 10,
     borderWidth: 1,
     borderColor: '#EEE',
   },
-  logHeader: { flexDirection: 'row', justifyContent: 'space-between', marginBottom: 8 },
-  sessionText: { fontSize: 13, color: '#333', flex: 1 },
-  sectionTitle: { marginTop: 10, fontWeight: 'bold', color: '#000', marginBottom: 6 },
-  visit: { marginBottom: 10, paddingLeft: 12 },
-  visitText: { fontSize: 14, fontWeight: '600', color: '#000' },
-  timestampText: { fontSize: 12, color: '#666', paddingLeft: 6 },
-  filtersText: { fontSize: 12, color: '#666', paddingLeft: 10 },
-  noVisits: { fontSize: 13, fontStyle: 'italic', color: '#999', marginLeft: 10 },
-  noLogs: { textAlign: 'center', marginTop: 30, fontSize: 15, color: '#999' },
-  modalBackground: { 
-    flex: 1, 
-    backgroundColor: 'rgba(0,0,0,0.7)', 
-    justifyContent: 'center', 
-    paddingHorizontal: 16 
-  },
-  modalContent: { 
-    backgroundColor: '#FFF', 
-    borderRadius: 16, 
-    padding: 20, 
-    maxHeight: '85%',
-    borderWidth: 1,
-    borderColor: '#DDD',
-  },
-  modalCloseButton: {
-  position: 'absolute',
-  top: 12,
-  right: 12,
-  zIndex: 10,
-},
-
-  modalTitle: { 
-    fontSize: 20, 
-    fontWeight: 'bold', 
-    color: '#000', 
-    marginBottom: 10,
-    borderBottomWidth: 1,
-    borderBottomColor: '#EEE',
-    paddingBottom: 8,
-  },
-  modalSubtitle: { 
-    fontSize: 17, 
-    color: '#333', 
-    marginBottom: 8 ,
-    fontWeight: 'bold' 
-  },
-  modalText: {
-    color: '#000',
-    marginBottom: 4,
-  },
- 
-  timelineWrapper: { 
-    backgroundColor: 'white', 
-    marginVertical: 16,
-    paddingHorizontal: 4,
-    borderRadius:20,
-    padding:15
-  },
-  timelineRow: { 
-    flexDirection: 'row', 
-    alignItems: 'center', 
-    height: 24,
+  timelineRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    height: 28,
   },
   timelineLineContainer: {
     flex: 1,
-    height: 4,
+    height: 6,
     backgroundColor: '#E0E0E0',
-    borderRadius: 2,
+    borderRadius: 3,
     marginHorizontal: 8,
     justifyContent: 'center',
     overflow: 'hidden',
   },
   timelineNode: {
-    width: 16,
-    height: 16,
-    borderRadius: 8,
+    width: 24,
+    height: 24,
+    borderRadius: 12,
+    justifyContent: 'center',
+    alignItems: 'center',
+    shadowColor: '#000',
+    shadowOffset: { width: 0, height: 2 },
+    shadowOpacity: 0.2,
+    shadowRadius: 3,
+    elevation: 3,
   },
   startNode: {
     backgroundColor: '#4CAF50',
@@ -342,9 +505,9 @@ const styles = StyleSheet.create({
     backgroundColor: '#F44336',
   },
   timelineLine: {
-    height: 4,
+    height: 6,
     backgroundColor: '#4CAF50',
-    borderRadius: 2,
+    borderRadius: 3,
   },
   timelineLinePartial: {
     width: '100%',
@@ -352,23 +515,25 @@ const styles = StyleSheet.create({
   },
   animatedCircle: {
     position: 'absolute',
-    width: 20,
-    height: 20,
-    borderRadius: 10,
+    width: 24,
+    height: 24,
+    borderRadius: 12,
     borderWidth: 2,
     borderColor: '#FFF',
     zIndex: 2,
     shadowColor: '#000',
     shadowOffset: { width: 0, height: 2 },
     shadowOpacity: 0.3,
-    shadowRadius: 3,
-    elevation: 4,
+    shadowRadius: 4,
+    elevation: 5,
     left: 0,
+    justifyContent: 'center',
+    alignItems: 'center',
   },
   timelineLabels: {
     flexDirection: 'row',
     justifyContent: 'space-between',
-    marginTop: 8,
+    marginTop: 12,
   },
   timelineLabel: {
     fontSize: 12,
@@ -377,23 +542,160 @@ const styles = StyleSheet.create({
     textAlign: 'center',
   },
   timelineDuration: {
-    fontSize: 12,
+    fontSize: 13,
     fontWeight: 'bold',
     color: '#424242',
     flex: 2,
     textAlign: 'center',
   },
+  visit: {
+    backgroundColor: '#FFF',
+    borderRadius: 8,
+    padding: 12,
+    marginBottom: 10,
+    borderLeftWidth: 3,
+    borderLeftColor: '#4A6FA5',
+  },
+  visitHeader: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    marginBottom: 4,
+  },
+  visitText: {
+    fontSize: 15,
+    fontWeight: '600',
+    color: '#333',
+    marginLeft: 8,
+  },
+  timestampText: {
+    fontSize: 12,
+    color: '#666',
+    marginLeft: 24,
+    marginBottom: 6,
+  },
   filtersBox: {
-    backgroundColor: '#F5F5F5',
-    padding: 8,
+    backgroundColor: '#F5F7FA',
+    padding: 10,
     borderRadius: 6,
-    marginTop: 6,
+    marginTop: 8,
   },
   filtersTitle: {
     fontWeight: 'bold',
-    fontSize: 12,
-    color: '#333',
+    fontSize: 11,
+    color: '#4A6FA5',
+    marginBottom: 6,
+    letterSpacing: 0.5,
+  },
+  filterItem: {
+    flexDirection: 'row',
+    alignItems: 'center',
     marginBottom: 4,
+  },
+  filtersText: {
+    fontSize: 12,
+    color: '#555',
+    marginLeft: 6,
+  },
+  noLogsContainer: {
+    flex: 1,
+    justifyContent: 'center',
+    alignItems: 'center',
+    padding: 40,
+  },
+  noLogs: {
+    fontSize: 16,
+    color: '#999',
+    marginTop: 16,
+    textAlign: 'center',
+  },
+  refreshButton: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    marginTop: 20,
+    padding: 10,
+    borderRadius: 8,
+    backgroundColor: 'rgba(74,111,165,0.1)',
+  },
+  refreshText: {
+    fontSize: 14,
+    color: '#4A6FA5',
+    marginLeft: 8,
+    fontWeight: '500',
+  },
+  modalContainer: {
+    flex: 1,
+    backgroundColor: '#F8F9FA',
+  },
+  modalHeader: {
+    backgroundColor: '#4A6FA5',
+    padding: 16,
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+    alignItems: 'center',
+  },
+  modalTitle: {
+    fontSize: 20,
+    fontWeight: 'bold',
+    color: '#FFF',
+  },
+  modalCloseButton: {
+    padding: 4,
+  },
+  modalScroll: {
+    flex: 1,
+    padding: 16,
+  },
+  sessionInfo: {
+    backgroundColor: '#FFF',
+    borderRadius: 12,
+    padding: 16,
+    marginBottom: 16,
+    shadowColor: '#000',
+    shadowOffset: { width: 0, height: 2 },
+    shadowOpacity: 0.05,
+    shadowRadius: 4,
+    elevation: 2,
+  },
+  infoRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    marginBottom: 12,
+  },
+  infoText: {
+    fontSize: 15,
+    color: '#333',
+    marginLeft: 12,
+  },
+  visitsSection: {
+    backgroundColor: '#FFF',
+    borderRadius: 12,
+    padding: 16,
+    shadowColor: '#000',
+    shadowOffset: { width: 0, height: 2 },
+    shadowOpacity: 0.05,
+    shadowRadius: 4,
+    elevation: 2,
+  },
+  sectionHeader: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    marginBottom: 16,
+  },
+  sectionTitle: {
+    fontSize: 18,
+    fontWeight: 'bold',
+    color: '#333',
+    marginLeft: 8,
+  },
+  noVisitsContainer: {
+    justifyContent: 'center',
+    alignItems: 'center',
+    padding: 20,
+  },
+  noVisitsText: {
+    fontSize: 14,
+    color: '#999',
+    marginTop: 8,
   },
 });
 

@@ -141,28 +141,28 @@ const ProfileScreen = ({ onLogout }) => {
 
           <View style={styles.buttonContainer}>
             <TouchableOpacity style={styles.actionButton} onPress={() => navigation.navigate('DownloadScreen')}>
-              <View style={[styles.buttonGradient, { backgroundColor: '#667eea' }]}>
+              <View style={[styles.buttonGradient, { backgroundColor: '#273780ff' }]}>
                 <Ionicons name="cloud-download-outline" size={22} color="white" />
                 <Text style={styles.buttonText}>Download Reports</Text>
               </View>
             </TouchableOpacity>
 
             <TouchableOpacity style={styles.actionButton} onPress={() => navigation.navigate('LogsScreen')}>
-              <View style={[styles.buttonGradient, { backgroundColor: '#f78ca0' }]}>
+              <View style={[styles.buttonGradient, { backgroundColor: '#395296ff' }]}>
                 <Ionicons name="document-text-outline" size={22} color="white" />
-                <Text style={styles.buttonText}>Logs History</Text>
+                <Text style={styles.buttonText}>Logs/Activity</Text>
               </View>
             </TouchableOpacity>
 
             <TouchableOpacity style={styles.actionButton} onPress={() => navigation.navigate('HistoryScreen')}>
-              <View style={[styles.buttonGradient, { backgroundColor: '#43e97b' }]}>
+              <View style={[styles.buttonGradient, { backgroundColor: '#43a9e9ff' }]}>
                 <Ionicons name="time-outline" size={22} color="white" />
                 <Text style={styles.buttonText}>View History</Text>
               </View>
             </TouchableOpacity>
 
             <TouchableOpacity style={styles.actionButton} onPress={() => setShowLogoutModal(true)}>
-              <View style={[styles.buttonGradient, { backgroundColor: '#ff758c' }]}>
+              <View style={[styles.buttonGradient, { backgroundColor: '#8599c5ff' }]}>
                 <Ionicons name="log-out-outline" size={22} color="white" />
                 <Text style={styles.buttonText}>Logout</Text>
               </View>

@@ -3,6 +3,8 @@ import axios from 'axios';
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import { BASE_URL } from '../config';
 
+
+
 const wait = (ms) => new Promise(resolve => setTimeout(resolve, ms));
 
 const debugCheckStorage = async () => {
@@ -155,3 +157,21 @@ export const logoutUser = async (token, sessionId) => {
   }
 };
 
+
+
+// Delete a visit from a log
+export const deleteVisitFromLog = async (logId, visitId) => {
+  const headers = await getAuthHeaders();
+  if (!headers) {
+    console.warn('⚠️ No auth headers for visit deletion');
+    return false;
+  }
+
+  try {
+    await axios.delete(`${BASE_URL}/api/auth/logs/${logId}/visit/${visitId}/`, headers);
+    return true;
+  } catch (err) {
+    console.error(`❌ Error deleting visit ${visitId} from log ${logId}:`, err);
+    return false;
+  }
+};
