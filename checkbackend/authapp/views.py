@@ -1,5 +1,12 @@
 
 
+
+
+
+
+
+
+
 from django.contrib.auth.models import User
 from django.contrib.auth import authenticate
 from rest_framework.views import APIView
@@ -263,6 +270,96 @@ def delete_history_record(request, id):
         return Response({'message': 'Record deleted'})
     except DownloadHistory.DoesNotExist:
         return Response({'error': 'Record not found or unauthorized'}, status=404)
+    
+
+# -------------------------------------dowload logs-----------------------------
+
+import io
+import pytz
+from datetime import datetime
+from django.http import HttpResponse
+from reportlab.lib.pagesizes import A4
+from reportlab.lib.units import inch
+from reportlab.lib import colors
+from reportlab.pdfgen import canvas
+from rest_framework.permissions import IsAuthenticated
+from rest_framework.decorators import api_view, permission_classes
+from .models import UserSessionLog, PageVisitLog
+
+@api_view(['GET'])
+@permission_classes([IsAuthenticated])
+def download_user_logs_pdf(request):
+    user = request.user
+    buffer = io.BytesIO()
+    p = canvas.Canvas(buffer, pagesize=A4)
+    width, height = A4
+    kolkata_tz = pytz.timezone("Asia/Kolkata")
+
+    try:
+        device_ip = request.META.get('REMOTE_ADDR')
+        device_name = request.META.get('HTTP_USER_AGENT', 'Unknown Device')
+
+        # Header
+        p.setFillColor(colors.darkblue)
+        p.setFont("Helvetica-Bold", 20)
+        p.drawString(50, height - 50, "📄 User Activity Report")
+
+        p.setFillColor(colors.black)
+        p.setFont("Helvetica", 12)
+        p.drawString(50, height - 80, f"👤 Username: {user.username}")
+        p.drawString(50, height - 100, f"📱 Device: {device_name}")
+        p.drawString(50, height - 120, f"🌐 IP Address: {device_ip}")
+
+        y = height - 160
+
+        # SESSION LOGS
+        p.setFillColor(colors.darkgreen)
+        p.setFont("Helvetica-Bold", 14)
+        p.drawString(50, y, "🟢 Session Logs")
+        y -= 20
+
+        p.setFont("Helvetica", 11)
+        p.setFillColor(colors.black)
+        session_logs = UserSessionLog.objects.filter(user=user).order_by('-login_time')[:10]
+        for log in session_logs:
+            login_time = log.login_time.astimezone(kolkata_tz).strftime('%d-%m-%Y %I:%M %p')
+            logout_time = log.logout_time.astimezone(kolkata_tz).strftime('%d-%m-%Y %I:%M %p') if log.logout_time else 'N/A'
+            p.drawString(60, y, f"🔓 Login: {login_time}   🔒 Logout: {logout_time}")
+            y -= 18
+            if y < 100:
+                p.showPage()
+                y = height - 50
+
+        y -= 10
+
+        # PAGE VISIT LOGS
+        p.setFillColor(colors.darkred)
+        p.setFont("Helvetica-Bold", 14)
+        p.drawString(50, y, "📑 Page Visit Logs")
+        y -= 20
+
+        p.setFont("Helvetica", 11)
+        p.setFillColor(colors.black)
+        visit_logs = PageVisitLog.objects.filter(session__user=user).order_by('-visited_at')[:10]
+        for log in visit_logs:
+            visited_at = log.visited_at.astimezone(kolkata_tz).strftime('%d-%m-%Y %I:%M %p')
+            p.drawString(60, y, f"📌 {log.page_name} — {visited_at}")
+            y -= 18
+            if y < 100:
+                p.showPage()
+                y = height - 50
+
+        # Final Save
+        p.save()
+        buffer.seek(0)
+
+        response = HttpResponse(buffer.getvalue(), content_type='application/pdf')
+        response['Content-Disposition'] = 'attachment; filename="user_logs.pdf"'
+        return response
+
+    except Exception as e:
+        print("❌ PDF generation error:", e)
+        return Response({"error": "Could not generate PDF"}, status=500)
 
 
 
@@ -278,12 +375,17 @@ def delete_history_record(request, id):
 # from rest_framework.response import Response
 # from rest_framework import status
 # from rest_framework_simplejwt.tokens import RefreshToken
-# from rest_framework.decorators import api_view
-# from rest_framework.response import Response
-# from rest_framework import status
-# from .models import DownloadHistory
-# from .serializers import DownloadHistorySerializer
+# from rest_framework.decorators import api_view, permission_classes
+# from rest_framework.permissions import IsAuthenticated
+# from django.utils import timezone
+# from datetime import timedelta
+# from django.db.models import Count
 
+# from .models import DownloadHistory, UserSessionLog, PageVisitLog
+# from .serializers import DownloadHistorySerializer, UserSessionLogSerializer
+# from .utils import get_client_ip
+
+# # ------------------ Registration ------------------ #
 # class RegisterView(APIView):
 #     def post(self, request):
 #         data = request.data
@@ -326,13 +428,14 @@ def delete_history_record(request, id):
 #             }
 #         }, status=status.HTTP_201_CREATED)
 
-
+# # ------------------ Login (multi-device supported) ------------------ #
 # class LoginView(APIView):
 #     def post(self, request):
 #         data = request.data
 #         email_or_username = data.get("email_or_username")
 #         password = data.get("password")
 
+#         # Resolve username from email or direct username
 #         try:
 #             user = User.objects.get(email=email_or_username)
 #             username = user.username
@@ -344,12 +447,28 @@ def delete_history_record(request, id):
 #         if user is None:
 #             return Response({"error": "Invalid credentials"}, status=status.HTTP_401_UNAUTHORIZED)
 
+#         # Get device and IP
+#         ip = get_client_ip(request)
+#         device = request.META.get('HTTP_USER_AGENT', 'Unknown')
+
+#         # Optional: close old active sessions before new login
+#         # UserSessionLog.objects.filter(user=user, is_active=True).update(is_active=False, logout_time=timezone.now())
+
+#         # Create a new active session
+#         session = UserSessionLog.objects.create(
+#     user=user,
+#     ip_address=ip,
+#     device_info=device,
+#     is_active=True
+# )
+
 #         refresh = RefreshToken.for_user(user)
 
 #         return Response({
 #             "message": "Login successful",
 #             "refresh": str(refresh),
 #             "access": str(refresh.access_token),
+#             "session_id": session.id,  # ✅ Add this
 #             "user": {
 #                 "id": user.id,
 #                 "username": user.username,
@@ -357,59 +476,252 @@ def delete_history_record(request, id):
 #                 "first_name": user.first_name,
 #                 "last_name": user.last_name,
 #             }
-#         }, status=status.HTTP_200_OK)
+#         })
+
+# # ------------------ Logout & End Session ------------------ #
 
 
 
 
 # @api_view(['POST'])
+# @permission_classes([IsAuthenticated])
+# def logout_user(request):
+#     print("📩 Logout API called")
+#     print("📥 Data:", request.data)
+#     print("🔐 User:", request.user)
+
+#     session_id = request.data.get("session_id")
+
+#     if session_id:
+#         try:
+#             session = UserSessionLog.objects.get(id=session_id, user=request.user)
+#             session.logout_time = timezone.now()
+#             session.is_active = False  # ✅ CORRECT (matches your model field)
+#             session.save()
+#             print("✅ Session marked inactive")
+#             return Response({"message": "Logout successful."})
+#         except UserSessionLog.DoesNotExist:
+#             print("❌ Session not found")
+#             return Response({"error": "Session not found."}, status=404)
+
+#     print("❌ No session ID provided")
+#     return Response({"error": "Missing session_id"}, status=400)
+
+
+
+
+
+# # ------------------ Log page visits ------------------ #
+# @api_view(['POST'])
+# @permission_classes([IsAuthenticated])
+# def log_page(request):
+#     user = request.user
+#     page = request.data.get("page_name")
+#     filters = request.data.get("filters", {})
+
+#     session = UserSessionLog.objects.filter(user=user, is_active=True).last()
+
+#     if not session:
+#         return Response({"error": "No active session"}, status=400)
+
+#     PageVisitLog.objects.create(
+#         session=session,
+#         page_name=page,
+#         filters_applied=filters
+#     )
+
+#     return Response({"message": "Page visit logged"})
+
+
+# # ------------------ View session logs (last 30 days) ------------------ #
+
+# from collections import defaultdict
+
+# @api_view(['GET'])
+# @permission_classes([IsAuthenticated])
+# def get_logs(request):
+#     user = request.user
+#     since = timezone.now() - timedelta(days=30)
+
+#     logs = UserSessionLog.objects.filter(user=user, login_time__gte=since) \
+#                                  .prefetch_related('visits') \
+#                                  .order_by('-login_time')
+
+#     grouped = defaultdict(list)
+#     for log in logs:
+#         log_data = UserSessionLogSerializer(log).data
+#         log_data['status'] = "Continuing" if log.is_active else "Ended"
+#         grouped[log.login_time.date().isoformat()].append(log_data)
+
+#     return Response(grouped)
+
+
+
+
+# # ---------------------------------delete logs-----------------------------------#
+
+# @api_view(['DELETE'])
+# @permission_classes([IsAuthenticated])
+# def delete_log_by_id(request, log_id):
+#     try:
+#         log = UserSessionLog.objects.get(id=log_id)
+#         log.delete()
+#         return Response({'message': 'Log deleted successfully'})
+#     except UserSessionLog.DoesNotExist:
+#         return Response({'error': 'Log not found'}, status=404)
+
+
+
+
+
+
+# # ------------------ Download History APIs ------------------ #
+# @api_view(['POST'])
+# @permission_classes([IsAuthenticated])
 # def record_history(request):
 #     data = request.data.copy()
-
-#     # Convert userId → user
 #     user_id = data.get('userId')
 #     if not user_id:
-#         return Response({"error": "Missing userId"}, status=status.HTTP_400_BAD_REQUEST)
-
-#     data['user'] = user_id  # serializer expects 'user' field
-
+#         return Response({"error": "Missing userId"}, status=400)
+#     data['user'] = user_id
 #     serializer = DownloadHistorySerializer(data=data)
 #     if serializer.is_valid():
 #         serializer.save()
-#         return Response(serializer.data, status=status.HTTP_201_CREATED)
-#     return Response(serializer.errors, status=status.HTTP_400_BAD_REQUEST)
-
+#         return Response(serializer.data, status=201)
+#     return Response(serializer.errors, status=400)
 
 # @api_view(['GET'])
+# @permission_classes([IsAuthenticated])
 # def list_history(request):
 #     try:
 #         user_id = request.GET.get('user_id')
 #         if not user_id:
-#             return Response({"error": "Missing user_id"}, status=status.HTTP_400_BAD_REQUEST)
+#             return Response({"error": "Missing user_id"}, status=400)
 
-#         # Optional: Convert to int to catch bad values early
 #         user_id = int(user_id)
-
 #         history = DownloadHistory.objects.filter(user__id=user_id).order_by('-downloadedAt')
 #         serializer = DownloadHistorySerializer(history, many=True)
 #         return Response(serializer.data)
 
 #     except ValueError:
-#         return Response({"error": "Invalid user_id"}, status=status.HTTP_400_BAD_REQUEST)
+#         return Response({"error": "Invalid user_id"}, status=400)
 #     except Exception as e:
-#         return Response({"error": str(e)}, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
-
+#         return Response({"error": str(e)}, status=500)
 
 # @api_view(['DELETE'])
+# @permission_classes([IsAuthenticated])
 # def clear_history(request):
 #     DownloadHistory.objects.all().delete()
 #     return Response({'message': 'History cleared'})
 
+# from django.views.decorators.csrf import csrf_exempt
+# from rest_framework.decorators import authentication_classes
+# from rest_framework_simplejwt.authentication import JWTAuthentication
+
+
+
+
+# @csrf_exempt
 # @api_view(['DELETE'])
+# @authentication_classes([JWTAuthentication])
+# @permission_classes([IsAuthenticated])
 # def delete_history_record(request, id):
 #     try:
-#         record = DownloadHistory.objects.get(id=id)
+#         record = DownloadHistory.objects.get(id=id, user=request.user)
 #         record.delete()
 #         return Response({'message': 'Record deleted'})
 #     except DownloadHistory.DoesNotExist:
-#         return Response({'error': 'Record not found'}, status=404)
+#         return Response({'error': 'Record not found or unauthorized'}, status=404)
+    
+
+# # -------------------------------------dowload logs-----------------------------
+
+# import io
+# import pytz
+# from datetime import datetime
+# from django.http import HttpResponse
+# from reportlab.lib.pagesizes import A4
+# from reportlab.lib.units import inch
+# from reportlab.lib import colors
+# from reportlab.pdfgen import canvas
+# from rest_framework.permissions import IsAuthenticated
+# from rest_framework.decorators import api_view, permission_classes
+# from .models import UserSessionLog, PageVisitLog
+
+# @api_view(['GET'])
+# @permission_classes([IsAuthenticated])
+# def download_user_logs_pdf(request):
+#     user = request.user
+#     buffer = io.BytesIO()
+#     p = canvas.Canvas(buffer, pagesize=A4)
+#     width, height = A4
+#     kolkata_tz = pytz.timezone("Asia/Kolkata")
+
+#     try:
+#         device_ip = request.META.get('REMOTE_ADDR')
+#         device_name = request.META.get('HTTP_USER_AGENT', 'Unknown Device')
+
+#         # Header
+#         p.setFillColor(colors.darkblue)
+#         p.setFont("Helvetica-Bold", 20)
+#         p.drawString(50, height - 50, "📄 User Activity Report")
+
+#         p.setFillColor(colors.black)
+#         p.setFont("Helvetica", 12)
+#         p.drawString(50, height - 80, f"👤 Username: {user.username}")
+#         p.drawString(50, height - 100, f"📱 Device: {device_name}")
+#         p.drawString(50, height - 120, f"🌐 IP Address: {device_ip}")
+
+#         y = height - 160
+
+#         # SESSION LOGS
+#         p.setFillColor(colors.darkgreen)
+#         p.setFont("Helvetica-Bold", 14)
+#         p.drawString(50, y, "🟢 Session Logs")
+#         y -= 20
+
+#         p.setFont("Helvetica", 11)
+#         p.setFillColor(colors.black)
+#         session_logs = UserSessionLog.objects.filter(user=user).order_by('-login_time')[:10]
+#         for log in session_logs:
+#             login_time = log.login_time.astimezone(kolkata_tz).strftime('%d-%m-%Y %I:%M %p')
+#             logout_time = log.logout_time.astimezone(kolkata_tz).strftime('%d-%m-%Y %I:%M %p') if log.logout_time else 'N/A'
+#             p.drawString(60, y, f"🔓 Login: {login_time}   🔒 Logout: {logout_time}")
+#             y -= 18
+#             if y < 100:
+#                 p.showPage()
+#                 y = height - 50
+
+#         y -= 10
+
+#         # PAGE VISIT LOGS
+#         p.setFillColor(colors.darkred)
+#         p.setFont("Helvetica-Bold", 14)
+#         p.drawString(50, y, "📑 Page Visit Logs")
+#         y -= 20
+
+#         p.setFont("Helvetica", 11)
+#         p.setFillColor(colors.black)
+#         visit_logs = PageVisitLog.objects.filter(session__user=user).order_by('-visited_at')[:10]
+#         for log in visit_logs:
+#             visited_at = log.visited_at.astimezone(kolkata_tz).strftime('%d-%m-%Y %I:%M %p')
+#             p.drawString(60, y, f"📌 {log.page_name} — {visited_at}")
+#             y -= 18
+#             if y < 100:
+#                 p.showPage()
+#                 y = height - 50
+
+#         # Final Save
+#         p.save()
+#         buffer.seek(0)
+
+#         response = HttpResponse(buffer.getvalue(), content_type='application/pdf')
+#         response['Content-Disposition'] = 'attachment; filename="user_logs.pdf"'
+#         return response
+
+#     except Exception as e:
+#         print("❌ PDF generation error:", e)
+#         return Response({"error": "Could not generate PDF"}, status=500)
+
+
+

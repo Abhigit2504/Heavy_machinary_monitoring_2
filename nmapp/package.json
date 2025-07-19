@@ -23,6 +23,7 @@
     "@react-navigation/native-stack": "^7.3.21",
     "@react-navigation/stack": "^7.4.2",
     "axios": "^1.10.0",
+    "buffer": "^6.0.3",
     "dayjs": "^1.11.13",
     "expo": "~53.0.12",
     "expo-app-loading": "^2.1.1",
@@ -44,6 +45,7 @@
     "react-native-chart-kit": "^6.12.0",
     "react-native-date-picker": "^5.0.13",
     "react-native-device-info": "^14.0.4",
+    "react-native-file-viewer": "^2.1.5",
     "react-native-fs": "^2.20.0",
     "react-native-gesture-handler": "~2.24.0",
     "react-native-html-to-pdf": "^0.12.0",
@@ -54,14 +56,17 @@
     "react-native-reanimated": "~3.17.4",
     "react-native-safe-area-context": "^5.5.1",
     "react-native-screens": "^4.11.1",
+    "react-native-share": "^12.1.0",
     "react-native-vector-icons": "^10.2.0",
     "react-native-view-shot": "^4.0.3",
     "react-native-web": "^0.20.0",
+    "rn-fetch-blob": "^0.12.0",
     "timezone": "^1.0.23",
     "utc": "^0.1.0"
   },
   "devDependencies": {
-    "@babel/core": "^7.20.0"
+    "@babel/core": "^7.20.0",
+    "@react-native-community/cli": "^19.1.0"
   },
   "private": true
 }

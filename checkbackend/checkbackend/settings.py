@@ -171,3 +171,5 @@ CHANNEL_LAYERS = {
     },
 }
 
+APPEND_SLASH = True  # default, should be True
+

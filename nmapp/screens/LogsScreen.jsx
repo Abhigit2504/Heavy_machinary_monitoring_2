@@ -9,20 +9,65 @@ import {
   Modal,
   Dimensions,
   Animated,
-  RefreshControl
+  RefreshControl,
 } from 'react-native';
 import {
   fetchLogs,
   deleteLogById,
 } from '../api/LogsApi';
 import * as Animatable from 'react-native-animatable';
+import axios from 'axios';
+import { Buffer } from 'buffer';
 import { Ionicons } from '@expo/vector-icons';
+import * as FileSystem from 'expo-file-system';
+import * as Sharing from 'expo-sharing';
+import AsyncStorage from '@react-native-async-storage/async-storage';
+import { BASE_URL } from '../config';
+
 
 const LogsScreen = () => {
   const [logsByDate, setLogsByDate] = useState({});
   const [selectedLog, setSelectedLog] = useState(null);
   const [isModalVisible, setModalVisible] = useState(false);
   const [isRefreshing, setIsRefreshing] = useState(false);
+  const [modalAnimation] = useState(new Animated.Value(0));
+
+
+const downloadLogs = async () => {
+  try {
+    const user = await AsyncStorage.getItem('user');
+    const parsedUser = JSON.parse(user);
+    const token = parsedUser?.token;
+
+    if (!token) {
+      console.log("❌ No token found");
+      return;
+    }
+
+    const downloadResumable = FileSystem.createDownloadResumable(
+      `${BASE_URL}/api/auth/logs/download/pdf/`,
+      FileSystem.documentDirectory + 'user_logs.pdf',
+      {
+        headers: {
+          Authorization: `Bearer ${token}`,
+          
+        },
+      }
+    );
+
+    const { uri } = await downloadResumable.downloadAsync();
+    // console.log('✅ Finished downloading to:', uri);
+
+    if (await Sharing.isAvailableAsync()) {
+      await Sharing.shareAsync(uri);
+    } else {
+      Alert.alert("Sharing not available on this device");
+    }
+
+  } catch (error) {
+    console.error("❌ Download error:", error.message || error);
+  }
+};
 
   useEffect(() => {
     loadLogs();
@@ -61,12 +106,46 @@ const LogsScreen = () => {
   const openLogModal = (log) => {
     setSelectedLog(log);
     setModalVisible(true);
+    // Start the unzip animation
+    modalAnimation.setValue(0);
+    Animated.spring(modalAnimation, {
+      toValue: 1,
+      useNativeDriver: true,
+      friction: 6,
+    }).start();
   };
 
   const closeLogModal = () => {
-    setSelectedLog(null);
-    setModalVisible(false);
+    Animated.timing(modalAnimation, {
+      toValue: 0,
+      duration: 300,
+      useNativeDriver: true,
+    }).start(() => {
+      setModalVisible(false);
+      setSelectedLog(null);
+    });
   };
+
+  // Animation styles for the modal
+  const modalScale = modalAnimation.interpolate({
+    inputRange: [0, 1],
+    outputRange: [0.8, 1],
+  });
+
+  const modalTranslateY = modalAnimation.interpolate({
+    inputRange: [0, 1],
+    outputRange: [50, 0],
+  });
+
+  const modalOpacity = modalAnimation.interpolate({
+    inputRange: [0, 1],
+    outputRange: [0, 1],
+  });
+
+  const modalBackgroundOpacity = modalAnimation.interpolate({
+    inputRange: [0, 1],
+    outputRange: [0, 0.5],
+  });
 
   const formatDuration = (start, end, log) => {
     if (!end || log.active) return 'Active Session';
@@ -210,10 +289,10 @@ const LogsScreen = () => {
       >
         <View style={styles.logHeader}>
           <View style={styles.logHeaderLeft}>
-            <Ionicons 
+            <Ionicons style={styles.wifi}
               name={log.active ? "wifi" : "wifi-outline"} 
-              size={16} 
-              color={log.active ? "#4CAF50" : "#F44336"} 
+              size={19} 
+              color={log.active ? "#4CAF50" : "#000000ff"} 
             />
             <Text style={styles.sessionText}>
               {log.ip_address} | {log.device_info}
@@ -269,36 +348,59 @@ const LogsScreen = () => {
           </View>
         ) : (
           Object.entries(logsByDate).map(([date, logs]) => {
-  const d = new Date(date);
-  const monthNames = ["Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul", "Aug", "Sep", "Oct", "Nov", "Dec"];
-  const formattedDate = `${d.getFullYear()}:${monthNames[d.getMonth()]}:${d.getDate().toString().padStart(2, '0')}`;
+            const d = new Date(date);
+            const monthNames = ["Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul", "Aug", "Sep", "Oct", "Nov", "Dec"];
+            const formattedDate = `${d.getFullYear()}:${monthNames[d.getMonth()]}:${d.getDate().toString().padStart(2, '0')}`;
 
-  return (
-    <View key={date} style={styles.dateGroup}>
-      <View style={styles.dateHeader}>
-        <Ionicons name="calendar" size={18} color="black" />
-        <Text style={styles.dateText}>{formattedDate}</Text>
-      </View>
-      {logs.map(renderLog)}
-    </View>
-  );
-})
+            return (
+              <View key={date} style={styles.dateGroup}>
+                <View style={styles.dateHeader}>
+                  <Ionicons name="calendar" size={18} color="black" />
+                  <Text style={styles.dateText}>{formattedDate}</Text>
+                </View>
+                {logs.map(renderLog)}
+              </View>
+            );
+          })
         )}
       </ScrollView>
 
       <Modal
         visible={isModalVisible}
-        animationType="slide"
-        transparent={false}
+        transparent={true}
+        animationType="none"
         onRequestClose={closeLogModal}
       >
-        <View style={styles.modalContainer}>
+        <Animated.View style={[styles.modalBackground, { opacity: modalBackgroundOpacity }]} />
+        
+        <Animated.View 
+          style={[
+            styles.modalContainer, 
+            { 
+              opacity: modalOpacity,
+              transform: [
+                { scale: modalScale },
+                { translateY: modalTranslateY }
+              ] 
+            }
+          ]}
+        >
+          
           <View style={styles.modalHeader}>
-            <Text style={styles.modalTitle}>Session Details</Text>
-            <TouchableOpacity onPress={closeLogModal} style={styles.modalCloseButton}>
-              <Ionicons name="close" size={28} color="#FFF" />
-            </TouchableOpacity>
-          </View>
+  <Text style={styles.modalTitle}>Session Details</Text>
+  <View style={styles.headerButtons}>
+    <TouchableOpacity 
+      onPress={downloadLogs} 
+      style={styles.downloadButton}
+    >
+      <Ionicons name="download-outline" size={24} color="#FFF" />
+    </TouchableOpacity>
+    <TouchableOpacity onPress={closeLogModal} style={styles.modalCloseButton}>
+      <Ionicons name="close" size={28} color="#FFF" />
+    </TouchableOpacity>
+  </View>
+</View>
+
           
           <ScrollView style={styles.modalScroll}>
             <View style={styles.sessionInfo}>
@@ -352,7 +454,7 @@ const LogsScreen = () => {
               )}
             </View>
           </ScrollView>
-        </View>
+        </Animated.View>
       </Modal>
     </View>
   );
@@ -449,6 +551,11 @@ const styles = StyleSheet.create({
     padding: 4,
     borderRadius: 20,
     backgroundColor: 'rgba(255,107,107,0.1)',
+  },
+    wifi: {
+    padding: 4,
+    borderRadius: 10,
+    backgroundColor: 'rgba(6, 0, 0, 0.1)',
   },
   visitsCount: {
     flexDirection: 'row',
@@ -622,25 +729,45 @@ const styles = StyleSheet.create({
     marginLeft: 8,
     fontWeight: '500',
   },
+  modalBackground: {
+    position: 'absolute',
+    top: 0,
+    left: 0,
+    right: 0,
+    bottom: 0,
+    backgroundColor: 'black',
+  },
   modalContainer: {
     flex: 1,
     backgroundColor: '#F8F9FA',
+    margin: 20,
+    borderRadius: 20,
+    overflow: 'hidden',
+    shadowColor: '#000',
+    shadowOffset: { width: 0, height: 10 },
+    shadowOpacity: 0.3,
+    shadowRadius: 20,
+    elevation: 10,
   },
-  modalHeader: {
-    backgroundColor: '#4A6FA5',
-    padding: 16,
-    flexDirection: 'row',
-    justifyContent: 'space-between',
-    alignItems: 'center',
-  },
+ modalHeader: {
+  backgroundColor: '#4A6FA5',
+  padding: 16,
+  flexDirection: 'row',
+  justifyContent: 'space-between',
+  alignItems: 'center',
+},
+headerButtons: {
+  flexDirection: 'row',
+  alignItems: 'center',
+},
   modalTitle: {
     fontSize: 20,
     fontWeight: 'bold',
     color: '#FFF',
   },
-  modalCloseButton: {
-    padding: 4,
-  },
+ modalCloseButton: {
+  padding: 4,
+},
   modalScroll: {
     flex: 1,
     padding: 16,
@@ -697,6 +824,11 @@ const styles = StyleSheet.create({
     color: '#999',
     marginTop: 8,
   },
+downloadButton: {
+  marginRight: 45, // Space between download and close buttons
+  padding: 4,
+},
+
 });
 
 export default LogsScreen;

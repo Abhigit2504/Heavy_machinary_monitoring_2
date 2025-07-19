@@ -7,3 +7,4 @@ urlpatterns = [
     path('api/',include('checkapp.urls')),
     path('api/auth/', include('authapp.urls')),
 ]
+

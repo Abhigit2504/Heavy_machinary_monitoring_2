@@ -175,3 +175,26 @@ export const deleteVisitFromLog = async (logId, visitId) => {
     return false;
   }
 };
+
+// Add this to your LogsApi.js
+export const recordPdfDownload = async (logId) => {
+  try {
+    const user = await AsyncStorage.getItem('user');
+    const parsedUser = JSON.parse(user);
+    const token = parsedUser?.token;
+
+    const response = await axios.post(
+      `${BASE_URL}/api/auth/logs/download/pdf/record/`,
+      { log_id: logId },
+      {
+        headers: {
+          Authorization: `Bearer ${token}`,
+        },
+      }
+    );
+    return response.data;
+  } catch (error) {
+    console.error('Error recording PDF download:', error);
+    throw error;
+  }
+};

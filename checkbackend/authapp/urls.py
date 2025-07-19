@@ -8,7 +8,7 @@ from .views import (
     delete_log_by_id,            
     get_logs,                    
     log_page,                    
-    logout_user                    
+    logout_user,download_user_logs_pdf                   
 )
 
 urlpatterns = [
@@ -19,9 +19,12 @@ urlpatterns = [
     path('history/clear/', clear_history),
     path('history/delete/<int:id>/', delete_history_record),
 
-    # ✅ ADD THESE ROUTES BELOW
+   
     path('logs/', get_logs),  # For fetchLogs
-    path('logs/delete/<int:log_id>/', delete_log_by_id),  # ✅ This fixes the 404
+    path('logs/delete/<int:log_id>/', delete_log_by_id), 
     path('logpage/', log_page),
     path('logout/', logout_user, name='logout'),  
+    path('logs/download/pdf/', download_user_logs_pdf, name='download_user_logs_pdf'),
+
+
 ]
