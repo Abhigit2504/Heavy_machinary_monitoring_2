@@ -10,20 +10,15 @@ import {
   Dimensions,
   Animated,
   RefreshControl,
+  ActivityIndicator,
 } from 'react-native';
-import {
-  fetchLogs,
-  deleteLogById,
-} from '../api/LogsApi';
+import { fetchLogs, deleteLogById } from '../api/LogsApi';
 import * as Animatable from 'react-native-animatable';
-import axios from 'axios';
-import { Buffer } from 'buffer';
 import { Ionicons } from '@expo/vector-icons';
 import * as FileSystem from 'expo-file-system';
 import * as Sharing from 'expo-sharing';
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import { BASE_URL } from '../config';
-
 
 const LogsScreen = () => {
   const [logsByDate, setLogsByDate] = useState({});
@@ -31,44 +26,9 @@ const LogsScreen = () => {
   const [isModalVisible, setModalVisible] = useState(false);
   const [isRefreshing, setIsRefreshing] = useState(false);
   const [modalAnimation] = useState(new Animated.Value(0));
+  const [isDownloading, setIsDownloading] = useState(false);
 
-
-const downloadLogs = async () => {
-  try {
-    const user = await AsyncStorage.getItem('user');
-    const parsedUser = JSON.parse(user);
-    const token = parsedUser?.token;
-
-    if (!token) {
-      console.log("❌ No token found");
-      return;
-    }
-
-    const downloadResumable = FileSystem.createDownloadResumable(
-      `${BASE_URL}/api/auth/logs/download/pdf/`,
-      FileSystem.documentDirectory + 'user_logs.pdf',
-      {
-        headers: {
-          Authorization: `Bearer ${token}`,
-          
-        },
-      }
-    );
-
-    const { uri } = await downloadResumable.downloadAsync();
-    // console.log('✅ Finished downloading to:', uri);
-
-    if (await Sharing.isAvailableAsync()) {
-      await Sharing.shareAsync(uri);
-    } else {
-      Alert.alert("Sharing not available on this device");
-    }
-
-  } catch (error) {
-    console.error("❌ Download error:", error.message || error);
-  }
-};
-
+  // Load logs on mount
   useEffect(() => {
     loadLogs();
   }, []);
@@ -79,9 +39,63 @@ const downloadLogs = async () => {
       const logs = await fetchLogs();
       setLogsByDate(logs);
     } catch (err) {
+      Alert.alert("Error", "Failed to load logs");
       console.error('Error fetching logs:', err);
     } finally {
       setIsRefreshing(false);
+    }
+  };
+
+  const downloadLogs = async (sessionId = null) => {
+    setIsDownloading(true);
+    try {
+      const user = await AsyncStorage.getItem('user');
+      const parsedUser = JSON.parse(user);
+      const token = parsedUser?.token;
+
+      if (!token) {
+        Alert.alert("Error", "Authentication required");
+        return;
+      }
+
+      let url = `${BASE_URL}/api/auth/logs/download/pdf/`;
+      if (sessionId) {
+        url += `?session_id=${sessionId}`;
+      }
+
+      const downloadResumable = FileSystem.createDownloadResumable(
+        url,
+        FileSystem.documentDirectory + (sessionId ? `session_${sessionId}.pdf` : 'all_logs.pdf'),
+        {
+          headers: {
+            Authorization: `Bearer ${token}`,
+          },
+        }
+      );
+
+      const { uri } = await downloadResumable.downloadAsync();
+      
+      if (await Sharing.isAvailableAsync()) {
+        await Sharing.shareAsync(uri, {
+          dialogTitle: sessionId ? 'Share Session Report' : 'Share All Logs',
+          mimeType: 'application/pdf',
+        });
+      } else {
+        Alert.alert(
+          "Download Complete",
+          `PDF saved to: ${uri}`,
+          [{ text: "OK" }]
+        );
+      }
+    } catch (error) {
+      Alert.alert(
+        "Download Failed",
+        error.message || "Could not download PDF",
+        [{ text: "OK" }]
+      );
+      console.error("Download error:", error);
+    } finally {
+      setIsDownloading(false);
     }
   };
 
@@ -96,6 +110,7 @@ const downloadLogs = async () => {
             await deleteLogById(logId);
             await loadLogs();
           } catch (err) {
+            Alert.alert("Error", "Failed to delete log");
             console.error('Delete failed:', err);
           }
         },
@@ -106,7 +121,6 @@ const downloadLogs = async () => {
   const openLogModal = (log) => {
     setSelectedLog(log);
     setModalVisible(true);
-    // Start the unzip animation
     modalAnimation.setValue(0);
     Animated.spring(modalAnimation, {
       toValue: 1,
@@ -126,27 +140,6 @@ const downloadLogs = async () => {
     });
   };
 
-  // Animation styles for the modal
-  const modalScale = modalAnimation.interpolate({
-    inputRange: [0, 1],
-    outputRange: [0.8, 1],
-  });
-
-  const modalTranslateY = modalAnimation.interpolate({
-    inputRange: [0, 1],
-    outputRange: [50, 0],
-  });
-
-  const modalOpacity = modalAnimation.interpolate({
-    inputRange: [0, 1],
-    outputRange: [0, 1],
-  });
-
-  const modalBackgroundOpacity = modalAnimation.interpolate({
-    inputRange: [0, 1],
-    outputRange: [0, 0.5],
-  });
-
   const formatDuration = (start, end, log) => {
     if (!end || log.active) return 'Active Session';
     
@@ -156,7 +149,7 @@ const downloadLogs = async () => {
     const minutes = Math.floor((diff % (1000 * 60 * 60)) / (1000 * 60));
     const seconds = Math.floor((diff % (1000 * 60)) / 1000);
     
-    return `${days.toString().padStart(2, '0')} days ${hours.toString().padStart(2, '0')}:${minutes.toString().padStart(2, '0')}:${seconds.toString().padStart(2, '0')}`;
+    return `${days > 0 ? days + 'd ' : ''}${hours.toString().padStart(2, '0')}:${minutes.toString().padStart(2, '0')}:${seconds.toString().padStart(2, '0')}`;
   };
 
   const renderVisit = (visit, i) => (
@@ -168,14 +161,17 @@ const downloadLogs = async () => {
       delay={i * 100}
     >
       <View style={styles.visitHeader}>
-        <Ionicons name="arrow-forward" size={18} color="#4A6FA5" />
+        <Ionicons name="document-text" size={18} color="#4A6FA5" />
         <Text style={styles.visitText}>{visit.page_name}</Text>
       </View>
-      <Text style={styles.timestampText}>Visited at: {new Date(visit.visited_at).toLocaleString()}</Text>
+      <Text style={styles.timestampText}>
+        <Ionicons name="time" size={14} color="#666" /> 
+        {new Date(visit.visited_at).toLocaleString()}
+      </Text>
       {visit.filters_applied && Object.keys(visit.filters_applied).length > 0 && (
         <View style={styles.filtersBox}>
           <Text style={styles.filtersTitle}>FILTERS APPLIED</Text>
-          {Object.entries(visit.filters_applied).map(([key, value]) => (
+          {Object.entries(visit.filters_applied).slice(0, 3).map(([key, value]) => (
             <View key={key} style={styles.filterItem}>
               <Ionicons name="options" size={12} color="#666" />
               <Text style={styles.filtersText}>
@@ -183,6 +179,9 @@ const downloadLogs = async () => {
               </Text>
             </View>
           ))}
+          {Object.keys(visit.filters_applied).length > 3 && (
+            <Text style={styles.moreFilters}>+{Object.keys(visit.filters_applied).length - 3} more</Text>
+          )}
         </View>
       )}
     </Animatable.View>
@@ -239,7 +238,7 @@ const downloadLogs = async () => {
               style={[
                 styles.animatedCircle,
                 { 
-                  backgroundColor: log.logout_time ? '#FF6B6B' : '#FFD700',
+                  backgroundColor: log.logout_time ? '#FF6B6B' : '#4CAF50',
                   transform: [
                     { translateX: log.logout_time ? translateX : lineWidth / 2 - 10 },
                     { scale: !log.logout_time ? scale : 1 }
@@ -248,7 +247,7 @@ const downloadLogs = async () => {
               ]}
             >
               {!log.logout_time && (
-                <Ionicons name="pulse" size={10} color="#000" />
+                <Ionicons name="pulse" size={10} color="#FFF" />
               )}
             </Animated.View>
           </View>
@@ -263,9 +262,11 @@ const downloadLogs = async () => {
           <Text style={styles.timelineDuration}>
             {formatDuration(log.login_time, log.logout_time, log)}
           </Text>
-          <Text style={styles.timelineLabel}>
-            {log.logout_time ? new Date(log.logout_time).toLocaleTimeString() : ''}
-          </Text>
+          {log.logout_time && (
+            <Text style={styles.timelineLabel}>
+              {new Date(log.logout_time).toLocaleTimeString()}
+            </Text>
+          )}
         </View>
       </View>
     );
@@ -289,33 +290,78 @@ const downloadLogs = async () => {
       >
         <View style={styles.logHeader}>
           <View style={styles.logHeaderLeft}>
-            <Ionicons style={styles.wifi}
+            <Ionicons 
               name={log.active ? "wifi" : "wifi-outline"} 
               size={19} 
-              color={log.active ? "#4CAF50" : "#000000ff"} 
+              color={log.active ? "#4CAF50" : "#666"} 
+              style={styles.wifiIcon}
             />
             <Text style={styles.sessionText}>
               {log.ip_address} | {log.device_info}
             </Text>
           </View>
-          <TouchableOpacity 
-            onPress={(e) => {
-              e.stopPropagation();
-              handleDeleteLog(log.id);
-            }}
-            style={styles.deleteButton}
-          >
-            <Ionicons name="trash" size={20} color="#FF6B6B" />
-          </TouchableOpacity>
+          <View style={styles.logHeaderRight}>
+            <TouchableOpacity 
+              onPress={(e) => {
+                e.stopPropagation();
+                downloadLogs(log.id);
+              }}
+              style={styles.downloadButton}
+              disabled={isDownloading}
+            >
+              {isDownloading ? (
+                <ActivityIndicator size="small" color="#4A6FA5" />
+              ) : (
+                <Ionicons name="download-outline" size={20} color="#4A6FA5" />
+              )}
+            </TouchableOpacity>
+            <TouchableOpacity 
+              onPress={(e) => {
+                e.stopPropagation();
+                handleDeleteLog(log.id);
+              }}
+              style={styles.deleteButton}
+            >
+              <Ionicons name="trash" size={20} color="#FF6B6B" />
+            </TouchableOpacity>
+          </View>
         </View>
         <Timeline log={log} />
         <View style={styles.visitsCount}>
           <Ionicons name="document-text" size={16} color="#4A6FA5" />
-          <Text style={styles.visitsCountText}>Visited {log.visits.length} page{log.visits.length !== 1 ? 's' : ''}</Text>
+          <Text style={styles.visitsCountText}>
+            Visited {log.visits.length} page{log.visits.length !== 1 ? 's' : ''}
+          </Text>
+          {log.active && (
+            <View style={styles.activeBadge}>
+              <Text style={styles.activeBadgeText}>ACTIVE</Text>
+            </View>
+          )}
         </View>
       </TouchableOpacity>
     </Animatable.View>
   );
+
+  // Animation styles for modal
+  const modalScale = modalAnimation.interpolate({
+    inputRange: [0, 1],
+    outputRange: [0.8, 1],
+  });
+
+  const modalTranslateY = modalAnimation.interpolate({
+    inputRange: [0, 1],
+    outputRange: [50, 0],
+  });
+
+  const modalOpacity = modalAnimation.interpolate({
+    inputRange: [0, 1],
+    outputRange: [0, 1],
+  });
+
+  const modalBackgroundOpacity = modalAnimation.interpolate({
+    inputRange: [0, 1],
+    outputRange: [0, 0.5],
+  });
 
   return (
     <View style={styles.container}>
@@ -324,6 +370,20 @@ const downloadLogs = async () => {
           <Ionicons name="analytics" size={24} color="#FFF" /> User Activity Logs
         </Text>
         <Text style={styles.subHeading}>Last 30 Days</Text>
+        <TouchableOpacity 
+          onPress={() => downloadLogs()}
+          style={styles.downloadAllButton}
+          disabled={isDownloading}
+        >
+          {isDownloading ? (
+            <ActivityIndicator size="small" color="#FFF" />
+          ) : (
+            <>
+              <Ionicons name="download" size={20} color="#FFF" />
+              <Text style={styles.downloadAllText}>Download All</Text>
+            </>
+          )}
+        </TouchableOpacity>
       </View>
       
       <ScrollView 
@@ -342,7 +402,7 @@ const downloadLogs = async () => {
             <Ionicons name="file-tray" size={48} color="#CCC" />
             <Text style={styles.noLogs}>No activity logs found</Text>
             <TouchableOpacity onPress={loadLogs} style={styles.refreshButton}>
-              <Ionicons name="refresh" size={20} color="black" />
+              <Ionicons name="refresh" size={20} color="#4A6FA5" />
               <Text style={styles.refreshText}>Refresh</Text>
             </TouchableOpacity>
           </View>
@@ -350,12 +410,12 @@ const downloadLogs = async () => {
           Object.entries(logsByDate).map(([date, logs]) => {
             const d = new Date(date);
             const monthNames = ["Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul", "Aug", "Sep", "Oct", "Nov", "Dec"];
-            const formattedDate = `${d.getFullYear()}:${monthNames[d.getMonth()]}:${d.getDate().toString().padStart(2, '0')}`;
+            const formattedDate = `${d.getDate().toString().padStart(2, '0')} ${monthNames[d.getMonth()]} ${d.getFullYear()}`;
 
             return (
               <View key={date} style={styles.dateGroup}>
                 <View style={styles.dateHeader}>
-                  <Ionicons name="calendar" size={18} color="black" />
+                  <Ionicons name="calendar" size={18} color="#4A6FA5" />
                   <Text style={styles.dateText}>{formattedDate}</Text>
                 </View>
                 {logs.map(renderLog)}
@@ -385,22 +445,28 @@ const downloadLogs = async () => {
             }
           ]}
         >
-          
           <View style={styles.modalHeader}>
-  <Text style={styles.modalTitle}>Session Details</Text>
-  <View style={styles.headerButtons}>
-    <TouchableOpacity 
-      onPress={downloadLogs} 
-      style={styles.downloadButton}
-    >
-      <Ionicons name="download-outline" size={24} color="#FFF" />
-    </TouchableOpacity>
-    <TouchableOpacity onPress={closeLogModal} style={styles.modalCloseButton}>
-      <Ionicons name="close" size={28} color="#FFF" />
-    </TouchableOpacity>
-  </View>
-</View>
-
+            <Text style={styles.modalTitle}>Session Details</Text>
+            <View style={styles.headerButtons}>
+              <TouchableOpacity 
+                onPress={() => downloadLogs(selectedLog?.id)} 
+                style={styles.downloadButtonModal}
+                disabled={isDownloading}
+              >
+                {isDownloading ? (
+                  <ActivityIndicator size="small" color="#FFF" />
+                ) : (
+                  <>
+                    <Ionicons name="download-outline" size={20} color="#FFF" />
+                    <Text style={styles.downloadButtonText}>PDF</Text>
+                  </>
+                )}
+              </TouchableOpacity>
+              <TouchableOpacity onPress={closeLogModal} style={styles.modalCloseButton}>
+                <Ionicons name="close" size={24} color="#FFF" />
+              </TouchableOpacity>
+            </View>
+          </View>
           
           <ScrollView style={styles.modalScroll}>
             <View style={styles.sessionInfo}>
@@ -467,11 +533,11 @@ const styles = StyleSheet.create({
   },
   header: {
     backgroundColor: '#4A6FA5',
-    paddingVertical: 10,
-    paddingHorizontal: 8,
+    paddingVertical: 15,
+    paddingHorizontal: 20,
     borderBottomLeftRadius: 20,
     borderBottomRightRadius: 20,
-    marginBottom: 3,
+    marginBottom: 5,
     shadowColor: '#000',
     shadowOffset: { width: 0, height: 4 },
     shadowOpacity: 0.1,
@@ -485,10 +551,26 @@ const styles = StyleSheet.create({
     textAlign: 'center',
   },
   subHeading: {
-    fontSize: 16,
-    color: 'rgba(255,255,255,0.8)',
+    fontSize: 14,
+    color: 'rgba(255,255,255,0.9)',
     textAlign: 'center',
     marginTop: 4,
+    marginBottom: 10,
+  },
+  downloadAllButton: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'center',
+    backgroundColor: 'rgba(255,255,255,0.2)',
+    padding: 8,
+    borderRadius: 20,
+    marginTop: 5,
+    alignSelf: 'center',
+  },
+  downloadAllText: {
+    color: '#FFF',
+    marginLeft: 8,
+    fontWeight: '500',
   },
   scrollContainer: {
     flex: 1,
@@ -506,9 +588,9 @@ const styles = StyleSheet.create({
     borderBottomColor: '#E0E0E0',
   },
   dateText: {
-    fontSize: 18,
+    fontSize: 16,
     fontWeight: '600',
-    color: '#000000ff',
+    color: '#4A6FA5',
     marginLeft: 8,
   },
   logCardContainer: {
@@ -516,7 +598,7 @@ const styles = StyleSheet.create({
     shadowColor: '#000',
     shadowOffset: { width: 0, height: 2 },
     shadowOpacity: 0.1,
-    shadowRadius: 4,
+    shadowRadius: 6,
     elevation: 3,
   },
   logCard: {
@@ -527,9 +609,9 @@ const styles = StyleSheet.create({
     borderColor: '#E0E0E0',
   },
   activeLogCard: {
-    borderColor: '#FFD700',
-    borderWidth: 2,
-    backgroundColor: '#FFFDF0',
+    borderColor: '#4CAF50',
+    borderWidth: 1.5,
+    backgroundColor: '#F5FFF5',
   },
   logHeader: {
     flexDirection: 'row',
@@ -542,20 +624,38 @@ const styles = StyleSheet.create({
     alignItems: 'center',
     flex: 1,
   },
+  logHeaderRight: {
+    flexDirection: 'row',
+    alignItems: 'center',
+  },
+  wifiIcon: {
+    padding: 4,
+    borderRadius: 10,
+    backgroundColor: 'rgba(0,0,0,0.05)',
+  },
   sessionText: {
     fontSize: 14,
     color: '#333',
     marginLeft: 8,
   },
+  downloadButton: {
+    padding: 4,
+    marginRight: 8,
+  },
   deleteButton: {
     padding: 4,
-    borderRadius: 20,
-    backgroundColor: 'rgba(255,107,107,0.1)',
   },
-    wifi: {
-    padding: 4,
+  activeBadge: {
+    backgroundColor: '#4CAF50',
+    paddingHorizontal: 8,
+    paddingVertical: 3,
     borderRadius: 10,
-    backgroundColor: 'rgba(6, 0, 0, 0.1)',
+    marginLeft: 10,
+  },
+  activeBadgeText: {
+    color: 'white',
+    fontSize: 10,
+    fontWeight: 'bold',
   },
   visitsCount: {
     flexDirection: 'row',
@@ -576,8 +676,6 @@ const styles = StyleSheet.create({
     borderRadius: 12,
     padding: 16,
     marginVertical: 10,
-    borderWidth: 1,
-    borderColor: '#EEE',
   },
   timelineRow: {
     flexDirection: 'row',
@@ -622,9 +720,9 @@ const styles = StyleSheet.create({
   },
   animatedCircle: {
     position: 'absolute',
-    width: 24,
-    height: 24,
-    borderRadius: 12,
+    width: 20,
+    height: 20,
+    borderRadius: 10,
     borderWidth: 2,
     borderColor: '#FFF',
     zIndex: 2,
@@ -656,12 +754,17 @@ const styles = StyleSheet.create({
     textAlign: 'center',
   },
   visit: {
-    backgroundColor: '#FFF',
+    backgroundColor: '#FFFFFF',
     borderRadius: 8,
     padding: 12,
-    marginBottom: 10,
-    borderLeftWidth: 3,
+    marginBottom: 15,
+    borderLeftWidth: 4,
     borderLeftColor: '#4A6FA5',
+    shadowColor: '#000',
+    shadowOffset: { width: 0, height: 1 },
+    shadowOpacity: 0.1,
+    shadowRadius: 3,
+    elevation: 2,
   },
   visitHeader: {
     flexDirection: 'row',
@@ -702,6 +805,12 @@ const styles = StyleSheet.create({
     fontSize: 12,
     color: '#555',
     marginLeft: 6,
+  },
+  moreFilters: {
+    fontSize: 11,
+    color: '#888',
+    marginTop: 4,
+    fontStyle: 'italic',
   },
   noLogsContainer: {
     flex: 1,
@@ -749,25 +858,39 @@ const styles = StyleSheet.create({
     shadowRadius: 20,
     elevation: 10,
   },
- modalHeader: {
-  backgroundColor: '#4A6FA5',
-  padding: 16,
-  flexDirection: 'row',
-  justifyContent: 'space-between',
-  alignItems: 'center',
-},
-headerButtons: {
-  flexDirection: 'row',
-  alignItems: 'center',
-},
+  modalHeader: {
+    backgroundColor: '#4A6FA5',
+    padding: 16,
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+    alignItems: 'center',
+  },
   modalTitle: {
     fontSize: 20,
     fontWeight: 'bold',
     color: '#FFF',
   },
- modalCloseButton: {
-  padding: 4,
-},
+  headerButtons: {
+    flexDirection: 'row',
+    alignItems: 'center',
+  },
+  downloadButtonModal: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    backgroundColor: 'rgba(255,255,255,0.2)',
+    paddingHorizontal: 12,
+    paddingVertical: 6,
+    borderRadius: 20,
+    marginRight: 15,
+  },
+  downloadButtonText: {
+    color: '#FFF',
+    marginLeft: 5,
+    fontWeight: '500',
+  },
+  modalCloseButton: {
+    padding: 4,
+  },
   modalScroll: {
     flex: 1,
     padding: 16,
@@ -824,11 +947,6 @@ headerButtons: {
     color: '#999',
     marginTop: 8,
   },
-downloadButton: {
-  marginRight: 45, // Space between download and close buttons
-  padding: 4,
-},
-
 });
 
 export default LogsScreen;

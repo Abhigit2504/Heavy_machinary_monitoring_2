@@ -221,7 +221,7 @@ const AppNavigator = () => {
           <Stack.Screen 
             name="LogsScreen" 
             component={LogsScreen} 
-            options={{ title: 'System Logs' }}
+            options={{ title: 'Logs/Activity' }}
           />
         </>
       ) : (

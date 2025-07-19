@@ -273,97 +273,106 @@ def delete_history_record(request, id):
     
 
 # -------------------------------------dowload logs-----------------------------
-
+# views.py
 import io
 import pytz
-from datetime import datetime
-from django.http import HttpResponse
+from django.http import FileResponse
 from reportlab.lib.pagesizes import A4
-from reportlab.lib.units import inch
 from reportlab.lib import colors
 from reportlab.pdfgen import canvas
-from rest_framework.permissions import IsAuthenticated
-from rest_framework.decorators import api_view, permission_classes
 from .models import UserSessionLog, PageVisitLog
+from django.shortcuts import get_object_or_404
+from datetime import datetime
+from rest_framework.decorators import api_view, permission_classes
+from rest_framework.permissions import IsAuthenticated
 
 @api_view(['GET'])
 @permission_classes([IsAuthenticated])
 def download_user_logs_pdf(request):
     user = request.user
+    session_id = request.GET.get('session_id', None)
+    kolkata_tz = pytz.timezone("Asia/Kolkata")
+
+    # Prepare PDF buffer
     buffer = io.BytesIO()
     p = canvas.Canvas(buffer, pagesize=A4)
     width, height = A4
-    kolkata_tz = pytz.timezone("Asia/Kolkata")
 
-    try:
-        device_ip = request.META.get('REMOTE_ADDR')
-        device_name = request.META.get('HTTP_USER_AGENT', 'Unknown Device')
+    # ===== HEADER SECTION =====
+    p.setFillColor(colors.HexColor('#4A6FA5'))
+    p.rect(0, height - 80, width, 80, fill=True, stroke=False)
+    p.setFont("Helvetica-Bold", 20)
+    p.setFillColor(colors.white)
+    p.drawString(40, height - 50, "USER ACTIVITY REPORT")
+    p.setFont("Helvetica", 10)
+    p.drawString(width - 150, height - 40, f"Generated: {datetime.now().strftime('%d-%m-%Y %H:%M')}")
 
-        # Header
-        p.setFillColor(colors.darkblue)
-        p.setFont("Helvetica-Bold", 20)
-        p.drawString(50, height - 50, "📄 User Activity Report")
+    y = height - 100
 
+    # Fetch logs
+    if session_id:
+        sessions = [get_object_or_404(UserSessionLog, id=session_id, user=user)]
+    else:
+        sessions = UserSessionLog.objects.filter(user=user).order_by('-login_time')[:50]
+
+    for session in sessions:
+        login = session.login_time.astimezone(kolkata_tz).strftime('%d-%m-%Y %H:%M:%S')
+        logout = session.logout_time.astimezone(kolkata_tz).strftime('%d-%m-%Y %H:%M:%S') if session.logout_time else 'Active'
+        duration = str(session.logout_time - session.login_time).split('.')[0] if session.logout_time else 'Active'
+        device = session.device_info or 'Unknown Device'
+        ip = session.ip_address or 'N/A'
+
+        # Session Info
+        p.setFont("Helvetica-Bold", 12)
         p.setFillColor(colors.black)
-        p.setFont("Helvetica", 12)
-        p.drawString(50, height - 80, f"👤 Username: {user.username}")
-        p.drawString(50, height - 100, f"📱 Device: {device_name}")
-        p.drawString(50, height - 120, f"🌐 IP Address: {device_ip}")
-
-        y = height - 160
-
-        # SESSION LOGS
-        p.setFillColor(colors.darkgreen)
-        p.setFont("Helvetica-Bold", 14)
-        p.drawString(50, y, "🟢 Session Logs")
+        p.drawString(40, y, f"Session ID: {session.id}")
+        y -= 16
+        p.setFont("Helvetica", 10)
+        p.drawString(60, y, f"Login Time: {login}")
+        y -= 14
+        p.drawString(60, y, f"Logout Time: {logout}")
+        y -= 14
+        p.drawString(60, y, f"Duration: {duration}")
+        y -= 14
+        p.drawString(60, y, f"IP Address: {ip}")
+        y -= 14
+        p.drawString(60, y, f"Device: {device}")
         y -= 20
 
-        p.setFont("Helvetica", 11)
-        p.setFillColor(colors.black)
-        session_logs = UserSessionLog.objects.filter(user=user).order_by('-login_time')[:10]
-        for log in session_logs:
-            login_time = log.login_time.astimezone(kolkata_tz).strftime('%d-%m-%Y %I:%M %p')
-            logout_time = log.logout_time.astimezone(kolkata_tz).strftime('%d-%m-%Y %I:%M %p') if log.logout_time else 'N/A'
-            p.drawString(60, y, f"🔓 Login: {login_time}   🔒 Logout: {logout_time}")
-            y -= 18
-            if y < 100:
-                p.showPage()
-                y = height - 50
+        # Page visits
+        visits = PageVisitLog.objects.filter(session=session).order_by('visited_at')
+        if visits.exists():
+            p.setFont("Helvetica-Bold", 11)
+            p.drawString(60, y, f"Pages Visited: {len(visits)}")
+            y -= 16
+            p.setFont("Helvetica", 9)
+            for visit in visits:
+                timestamp = visit.visited_at.astimezone(kolkata_tz).strftime('%H:%M:%S')
+                page = visit.page_name
+                p.drawString(80, y, f"[{timestamp}] {page}")
+                y -= 12
+                if visit.filters_applied:
+                    p.drawString(100, y, f"Filters: {str(visit.filters_applied)}")
+                    y -= 12
 
-        y -= 10
+                if y < 100:
+                    p.showPage()
+                    y = height - 100
+        else:
+            p.setFont("Helvetica-Italic", 9)
+            p.drawString(60, y, "No page visits recorded.")
+            y -= 20
 
-        # PAGE VISIT LOGS
-        p.setFillColor(colors.darkred)
-        p.setFont("Helvetica-Bold", 14)
-        p.drawString(50, y, "📑 Page Visit Logs")
         y -= 20
+        if y < 100:
+            p.showPage()
+            y = height - 100
 
-        p.setFont("Helvetica", 11)
-        p.setFillColor(colors.black)
-        visit_logs = PageVisitLog.objects.filter(session__user=user).order_by('-visited_at')[:10]
-        for log in visit_logs:
-            visited_at = log.visited_at.astimezone(kolkata_tz).strftime('%d-%m-%Y %I:%M %p')
-            p.drawString(60, y, f"📌 {log.page_name} — {visited_at}")
-            y -= 18
-            if y < 100:
-                p.showPage()
-                y = height - 50
+    p.save()
+    buffer.seek(0)
 
-        # Final Save
-        p.save()
-        buffer.seek(0)
-
-        response = HttpResponse(buffer.getvalue(), content_type='application/pdf')
-        response['Content-Disposition'] = 'attachment; filename="user_logs.pdf"'
-        return response
-
-    except Exception as e:
-        print("❌ PDF generation error:", e)
-        return Response({"error": "Could not generate PDF"}, status=500)
-
-
-
-
+    filename = f"user_logs_{user.username}_{datetime.now().strftime('%Y%m%d_%H%M')}.pdf"
+    return FileResponse(buffer, as_attachment=True, filename=filename)
 
 
 
