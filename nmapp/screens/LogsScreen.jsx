@@ -11,6 +11,8 @@ import {
   Animated,
   RefreshControl,
   ActivityIndicator,
+  Platform,
+  Linking
 } from 'react-native';
 import { fetchLogs, deleteLogById } from '../api/LogsApi';
 import * as Animatable from 'react-native-animatable';
@@ -63,9 +65,12 @@ const LogsScreen = () => {
         url += `?session_id=${sessionId}`;
       }
 
+      const filename = `user_activity_${sessionId || 'all'}_${new Date().toISOString().split('T')[0]}.pdf`;
+      const path = `${FileSystem.documentDirectory}${filename}`;
+
       const downloadResumable = FileSystem.createDownloadResumable(
         url,
-        FileSystem.documentDirectory + (sessionId ? `session_${sessionId}.pdf` : 'all_logs.pdf'),
+        path,
         {
           headers: {
             Authorization: `Bearer ${token}`,
@@ -74,26 +79,42 @@ const LogsScreen = () => {
       );
 
       const { uri } = await downloadResumable.downloadAsync();
+      const fileInfo = await FileSystem.getInfoAsync(uri);
       
-      if (await Sharing.isAvailableAsync()) {
-        await Sharing.shareAsync(uri, {
-          dialogTitle: sessionId ? 'Share Session Report' : 'Share All Logs',
+      if (!fileInfo.exists) {
+        throw new Error("File download failed");
+      }
+
+      if (Platform.OS === 'android') {
+        const base64 = await FileSystem.readAsStringAsync(uri, {
+          encoding: FileSystem.EncodingType.Base64,
+        });
+        
+        const androidUri = `${FileSystem.cacheDirectory}${filename}`;
+        await FileSystem.writeAsStringAsync(androidUri, base64, {
+          encoding: FileSystem.EncodingType.Base64,
+        });
+        
+        await Sharing.shareAsync(androidUri, {
           mimeType: 'application/pdf',
+          dialogTitle: 'Share Activity Report',
+          UTI: 'com.adobe.pdf'
         });
       } else {
-        Alert.alert(
-          "Download Complete",
-          `PDF saved to: ${uri}`,
-          [{ text: "OK" }]
-        );
+        await Sharing.shareAsync(uri, {
+          mimeType: 'application/pdf',
+          dialogTitle: 'Share Activity Report',
+          UTI: 'com.adobe.pdf'
+        });
       }
+
     } catch (error) {
+      console.error("Download error:", error);
       Alert.alert(
-        "Download Failed",
-        error.message || "Could not download PDF",
+        "Error",
+        "Failed to share PDF. Please try again.",
         [{ text: "OK" }]
       );
-      console.error("Download error:", error);
     } finally {
       setIsDownloading(false);
     }
@@ -187,90 +208,91 @@ const LogsScreen = () => {
     </Animatable.View>
   );
 
-  const Timeline = ({ log }) => {
-    const animValue = new Animated.Value(0);
-    const lineWidth = Dimensions.get('window').width - 100;
-    
-    useEffect(() => {
-      if (log.active || !log.logout_time) {
-        Animated.loop(
-          Animated.sequence([
-            Animated.timing(animValue, {
-              toValue: 1,
-              duration: 1000,
-              useNativeDriver: true,
-            }),
-            Animated.timing(animValue, {
-              toValue: 0,
-              duration: 1000,
-              useNativeDriver: true,
-            }),
-          ])
-        ).start();
-      } else {
-        Animated.timing(animValue, {
-          toValue: 1,
-          duration: 2000,
-          useNativeDriver: true,
-        }).start();
-      }
-    }, []);
+const Timeline = ({ log }) => {
+  const animValue = new Animated.Value(0);
+  const lineWidth = Dimensions.get('window').width - 100;
+  
+  useEffect(() => {
+    if (log.active || !log.logout_time) {
+      Animated.loop(
+        Animated.sequence([
+          Animated.timing(animValue, {
+            toValue: 1,
+            duration: 1000,
+            useNativeDriver: true,
+          }),
+          Animated.timing(animValue, {
+            toValue: 0,
+            duration: 1000,
+            useNativeDriver: true,
+          }),
+        ])
+      ).start();
+    } else {
+      Animated.timing(animValue, {
+        toValue: 1,
+        duration: 2000,
+        useNativeDriver: true,
+      }).start();
+    }
+  }, []);
 
-    const translateX = animValue.interpolate({
-      inputRange: [0, 1],
-      outputRange: [0, lineWidth - 20],
-    });
+  const translateX = animValue.interpolate({
+    inputRange: [0, 1],
+    outputRange: [0, lineWidth - 20],
+  });
 
-    const scale = animValue.interpolate({
-      inputRange: [0, 0.5, 1],
-      outputRange: [1, 1.3, 1],
-    });
+  const scale = animValue.interpolate({
+    inputRange: [0, 0.5, 1],
+    outputRange: [1, 1.3, 1],
+  });
 
-    return (
-      <View style={styles.timelineWrapper}>
-        <View style={styles.timelineRow}>
-          <View style={[styles.timelineNode, styles.startNode]}>
-            <Ionicons name="log-in" size={12} color="white" />
-          </View>
-          <View style={styles.timelineLineContainer}>
-            <View style={[styles.timelineLine, !log.logout_time && styles.timelineLinePartial]} />
-            <Animated.View 
-              style={[
-                styles.animatedCircle,
-                { 
-                  backgroundColor: log.logout_time ? '#FF6B6B' : '#4CAF50',
-                  transform: [
-                    { translateX: log.logout_time ? translateX : lineWidth / 2 - 10 },
-                    { scale: !log.logout_time ? scale : 1 }
-                  ],
-                }
-              ]}
-            >
-              {!log.logout_time && (
-                <Ionicons name="pulse" size={10} color="#FFF" />
-              )}
-            </Animated.View>
-          </View>
-          {log.logout_time && (
-            <View style={[styles.timelineNode, styles.endNode]}>
-              <Ionicons name="log-out" size={12} color="white" />
-            </View>
-          )}
+  return (
+    <View style={styles.timelineWrapper}>
+      <View style={styles.timelineRow}>
+        <View style={[styles.timelineNode, styles.startNode]}>
+          <Ionicons name="log-in" size={12} color="white" />
         </View>
-        <View style={styles.timelineLabels}>
-          <Text style={styles.timelineLabel}>{new Date(log.login_time).toLocaleTimeString()}</Text>
-          <Text style={styles.timelineDuration}>
-            {formatDuration(log.login_time, log.logout_time, log)}
-          </Text>
-          {log.logout_time && (
-            <Text style={styles.timelineLabel}>
-              {new Date(log.logout_time).toLocaleTimeString()}
-            </Text>
-          )}
+        <View style={styles.timelineLineContainer}>
+          <View style={[styles.timelineLine, !log.logout_time && styles.timelineLinePartial]} />
+          <Animated.View 
+            style={[
+              styles.animatedCircle,
+              { 
+                backgroundColor: log.logout_time ? '#FF6B6B' : '#FFD700', // Changed from #4CAF50 to #FFD700 (yellow)
+                transform: [
+                  { translateX: log.logout_time ? translateX : lineWidth / 2 - 10 },
+                  { scale: !log.logout_time ? scale : 1 }
+                ],
+              }
+            ]}
+          >
+            {!log.logout_time && (
+              <Ionicons name="pulse" size={10} color="#000" /> // Changed from #FFF to #000 for better visibility
+            )}
+          </Animated.View>
         </View>
+        {log.logout_time && (
+          <View style={[styles.timelineNode, styles.endNode]}>
+            <Ionicons name="log-out" size={12} color="white" />
+          </View>
+        )}
       </View>
-    );
-  };
+      <View style={styles.timelineLabels}>
+        <Text style={styles.timelineLabel}>{new Date(log.login_time).toLocaleTimeString()}</Text>
+        <Text style={styles.timelineDuration}>
+          {formatDuration(log.login_time, log.logout_time, log)}
+        </Text>
+        {log.logout_time && (
+          <Text style={styles.timelineLabel}>
+            {new Date(log.logout_time).toLocaleTimeString()}
+          </Text>
+        )}
+      </View>
+    </View>
+  );
+};
+
 
   const renderLog = (log, index) => (
     <Animatable.View 
@@ -370,20 +392,6 @@ const LogsScreen = () => {
           <Ionicons name="analytics" size={24} color="#FFF" /> User Activity Logs
         </Text>
         <Text style={styles.subHeading}>Last 30 Days</Text>
-        <TouchableOpacity 
-          onPress={() => downloadLogs()}
-          style={styles.downloadAllButton}
-          disabled={isDownloading}
-        >
-          {isDownloading ? (
-            <ActivityIndicator size="small" color="#FFF" />
-          ) : (
-            <>
-              <Ionicons name="download" size={20} color="#FFF" />
-              <Text style={styles.downloadAllText}>Download All</Text>
-            </>
-          )}
-        </TouchableOpacity>
       </View>
       
       <ScrollView 
@@ -557,21 +565,6 @@ const styles = StyleSheet.create({
     marginTop: 4,
     marginBottom: 10,
   },
-  downloadAllButton: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    justifyContent: 'center',
-    backgroundColor: 'rgba(255,255,255,0.2)',
-    padding: 8,
-    borderRadius: 20,
-    marginTop: 5,
-    alignSelf: 'center',
-  },
-  downloadAllText: {
-    color: '#FFF',
-    marginLeft: 8,
-    fontWeight: '500',
-  },
   scrollContainer: {
     flex: 1,
     paddingHorizontal: 16,
@@ -646,14 +639,14 @@ const styles = StyleSheet.create({
     padding: 4,
   },
   activeBadge: {
-    backgroundColor: '#4CAF50',
+    backgroundColor: '#FFD700',
     paddingHorizontal: 8,
     paddingVertical: 3,
     borderRadius: 10,
     marginLeft: 10,
   },
   activeBadgeText: {
-    color: 'white',
+    color: '#000',
     fontSize: 10,
     fontWeight: 'bold',
   },
