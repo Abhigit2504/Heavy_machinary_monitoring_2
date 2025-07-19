@@ -12,6 +12,7 @@ import { LineChart } from 'react-native-chart-kit';
 import axios from 'axios';
 import dayjs from 'dayjs';
 import Ionicons from 'react-native-vector-icons/Ionicons';
+import MaterialCommunityIcons from '@expo/vector-icons/MaterialCommunityIcons';
 
 const theme = {
   primary: "#4a6da7",
@@ -133,12 +134,13 @@ const MachineStatusGraph = ({ gfrid, fromDate, toDate, range }) => {
         <View style={styles.summaryContent}>
           <View style={styles.summaryRow}>
             <View style={styles.summaryItem}>
-              <Ionicons name="power" size={20} color="#10b981" />
+            <MaterialCommunityIcons name="toggle-switch-outline" size={24} color="green" />
+
               <Text style={styles.summaryLabel}>ON Time:</Text>
               <Text style={styles.summaryValue}>{formatTime(statusDetails.onTime)}</Text>
             </View>
             <View style={styles.summaryItem}>
-              <Ionicons name="power" size={20} color="#ef4444" />
+             <MaterialCommunityIcons name="toggle-switch-off-outline" size={24} color="red" />
               <Text style={styles.summaryLabel}>OFF Time:</Text>
               <Text style={styles.summaryValue}>{formatTime(statusDetails.offTime)}</Text>
             </View>

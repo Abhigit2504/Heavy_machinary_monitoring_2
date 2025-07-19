@@ -77,6 +77,8 @@
 import React, { useRef } from "react";
 import { createBottomTabNavigator } from "@react-navigation/bottom-tabs";
 import { Ionicons } from "@expo/vector-icons";
+import { FontAwesome6 } from '@expo/vector-icons';
+import { MaterialCommunityIcons } from '@expo/vector-icons';
 import { Text, Platform, Animated, View, StyleSheet } from "react-native";
 import { LinearGradient } from 'expo-linear-gradient';
 
@@ -96,7 +98,6 @@ const CustomHeader = ({ title }) => {
   
   React.useEffect(() => {
     Animated.sequence([
-      // Initial animation
       Animated.parallel([
         Animated.timing(titleOpacity, {
           toValue: 1,
@@ -110,9 +111,7 @@ const CustomHeader = ({ title }) => {
           useNativeDriver: false,
         }),
       ]),
-      // Pause
       Animated.delay(800),
-      // Final state
       Animated.parallel([
         Animated.timing(gearOpacity, {
           toValue: 0,
@@ -179,36 +178,53 @@ const TabNavigator = ({ onLogout }) => {
       screenOptions={({ route }) => ({
         header: () => <CustomHeader title={route.name} />,
         headerStyle: {
-          height: 70,  // Reduced header height
+          height: 70,
         },
         tabBarShowLabel: true,
         tabBarIcon: ({ focused }) => {
-          let iconName;
-          switch(route.name) {
-            case "Dashboard": iconName = "speedometer"; break;
-            case "Info": iconName = "information-circle"; break;
-            case "Profile": iconName = "person"; break;
-            default: iconName = "apps";
-          }
+          switch (route.name) {
+            case "Dashboard":
+              return (
+                <MaterialCommunityIcons
+                  name="view-dashboard-outline"
+                  size={24}
+                  color={focused ? "#fff" : "rgba(255,255,255,0.7)"}
+                />
+              );
+            case "Profile":
+              return (
+                <FontAwesome6
+                  name="user-gear"
+                  size={20}
+                  color={focused ? "#fff" : "rgba(255,255,255,0.7)"}
+                />
+              );
+          case "Info":
+            return (
+              <MaterialCommunityIcons
+                name="details"
+                size={24}
+                color={focused ? "#fff" : "rgba(255,255,255,0.7)"}
+              />
+            );
 
-          return (
-            <Ionicons
-              name={iconName}
-              size={24}
-              color={focused ? "#fff" : "rgba(255,255,255,0.7)"}
-            />
-          );
+            default:
+              return (
+                <Ionicons
+                  name="apps"
+                  size={24}
+                  color={focused ? "#fff" : "rgba(255,255,255,0.7)"}
+                />
+              );
+          }
         },
         tabBarLabel: ({ focused }) => (
-          <Text style={[
-            styles.tabLabel,
-            focused && styles.tabLabelFocused
-          ]}>
+          <Text style={[styles.tabLabel, focused && styles.tabLabelFocused]}>
             {route.name}
           </Text>
         ),
         tabBarStyle: {
-          height: 60,  // More compact tab bar
+          height: 60,
           paddingBottom: 6,
           backgroundColor: '#5279a8',
           borderTopWidth: 0,
@@ -229,10 +245,9 @@ const styles = StyleSheet.create({
   headerContainer: {
     height: 70,
     justifyContent: 'center',
-    // alignItems: 'center',
     borderBottomWidth: 1,
     borderBottomColor: 'rgba(255,255,255,0.1)',
-    marginTop:30
+    marginTop: 30,
   },
   headerTitleContainer: {
     flexDirection: 'row',

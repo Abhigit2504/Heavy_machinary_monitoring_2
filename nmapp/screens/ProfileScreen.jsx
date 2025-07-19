@@ -12,6 +12,8 @@ import {
   RefreshControl,
   ImageBackground,
 } from 'react-native';
+import Foundation from '@expo/vector-icons/Foundation';
+import FontAwesome5 from '@expo/vector-icons/FontAwesome5';
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import { Ionicons } from '@expo/vector-icons';
 import { useNavigation } from '@react-navigation/native';
@@ -142,7 +144,7 @@ const ProfileScreen = ({ onLogout }) => {
           <View style={styles.buttonContainer}>
             <TouchableOpacity style={styles.actionButton} onPress={() => navigation.navigate('DownloadScreen')}>
               <View style={[styles.buttonGradient, { backgroundColor: '#273780ff' }]}>
-                <Ionicons name="cloud-download-outline" size={22} color="white" />
+                <Foundation name="download" size={22} color="white" />
                 <Text style={styles.buttonText}>Download Reports</Text>
               </View>
             </TouchableOpacity>
@@ -156,7 +158,7 @@ const ProfileScreen = ({ onLogout }) => {
 
             <TouchableOpacity style={styles.actionButton} onPress={() => navigation.navigate('HistoryScreen')}>
               <View style={[styles.buttonGradient, { backgroundColor: '#43a9e9ff' }]}>
-                <Ionicons name="time-outline" size={22} color="white" />
+                <FontAwesome5 name="history" size={20} color="white" />
                 <Text style={styles.buttonText}>View History</Text>
               </View>
             </TouchableOpacity>

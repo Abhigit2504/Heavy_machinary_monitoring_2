@@ -11,6 +11,7 @@ import {
   Easing,
 } from 'react-native';
 import axios from 'axios';
+import MaterialCommunityIcons from '@expo/vector-icons/MaterialCommunityIcons';
 import { LineChart } from 'react-native-chart-kit';
 import { Ionicons } from '@expo/vector-icons';
 import dayjs from 'dayjs';
@@ -313,10 +314,8 @@ const InfoWrapper = () => {
         <View key={machine.gfrid} style={styles.machineCard}>
           
           <Text style={styles.machineTitle}>
-             <Ionicons 
-                name="hardware-chip-outline" 
-                size={18} 
-              />GFRID: {machine.gfrid}</Text>
+             <MaterialCommunityIcons name="state-machine" size={24} color="black" />
+              GFRID: {machine.gfrid}</Text>
           {machine.status_records.length > 0 ? (
             <PaginatedGraph
               records={machine.status_records}

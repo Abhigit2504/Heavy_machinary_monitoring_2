@@ -14,6 +14,8 @@ import {
   Platform,
   Linking
 } from 'react-native';
+import MaterialIcons from '@expo/vector-icons/MaterialIcons';
+import FontAwesome from '@expo/vector-icons/FontAwesome';
 import { fetchLogs, deleteLogById } from '../api/LogsApi';
 import * as Animatable from 'react-native-animatable';
 import { Ionicons } from '@expo/vector-icons';
@@ -182,7 +184,7 @@ const LogsScreen = () => {
       delay={i * 100}
     >
       <View style={styles.visitHeader}>
-        <Ionicons name="document-text" size={18} color="#4A6FA5" />
+        <MaterialIcons name="screenshot-monitor" size={16} color="black" />
         <Text style={styles.visitText}>{visit.page_name}</Text>
       </View>
       <Text style={styles.timestampText}>
@@ -312,10 +314,10 @@ const Timeline = ({ log }) => {
       >
         <View style={styles.logHeader}>
           <View style={styles.logHeaderLeft}>
-            <Ionicons 
-              name={log.active ? "wifi" : "wifi-outline"} 
+            <MaterialIcons 
+              name={log.active ? "wifi" : "wifi"} 
               size={19} 
-              color={log.active ? "#4CAF50" : "#666"} 
+              color={log.active ? "#4CAF50" : "black"} 
               style={styles.wifiIcon}
             />
             <Text style={styles.sessionText}>
@@ -389,7 +391,7 @@ const Timeline = ({ log }) => {
     <View style={styles.container}>
       <View style={styles.header}>
         <Text style={styles.heading}>
-          <Ionicons name="analytics" size={24} color="#FFF" /> User Activity Logs
+          <FontAwesome name="gears" size={24} color="white" /> User Activity Logs
         </Text>
         <Text style={styles.subHeading}>Last 30 Days</Text>
       </View>
@@ -514,8 +516,8 @@ const Timeline = ({ log }) => {
             
             <View style={styles.visitsSection}>
               <View style={styles.sectionHeader}>
-                <Ionicons name="document-text" size={20} color="#4A6FA5" />
-                <Text style={styles.sectionTitle}>Pages Visited ({selectedLog?.visits?.length || 0})</Text>
+                        <MaterialIcons name="screen-search-desktop" size={16} color="black" />
+                <Text style={styles.sectionTitle}>Pages Visited - {selectedLog?.visits?.length || 0}</Text>
               </View>
               
               {selectedLog?.visits?.length > 0 ? (
@@ -537,15 +539,15 @@ const Timeline = ({ log }) => {
 const styles = StyleSheet.create({
   container: {
     flex: 1,
-    backgroundColor: '#F8F9FA',
+    backgroundColor: '#ecf3f6ff',
   },
   header: {
     backgroundColor: '#4A6FA5',
-    paddingVertical: 15,
-    paddingHorizontal: 20,
+    paddingVertical: 5,
+    paddingHorizontal: 10,
     borderBottomLeftRadius: 20,
     borderBottomRightRadius: 20,
-    marginBottom: 5,
+    // marginBottom: 5,
     shadowColor: '#000',
     shadowOffset: { width: 0, height: 4 },
     shadowOpacity: 0.1,
@@ -553,7 +555,7 @@ const styles = StyleSheet.create({
     elevation: 5,
   },
   heading: {
-    fontSize: 24,
+    fontSize: 20,
     fontWeight: 'bold',
     color: '#FFF',
     textAlign: 'center',
@@ -562,15 +564,15 @@ const styles = StyleSheet.create({
     fontSize: 14,
     color: 'rgba(255,255,255,0.9)',
     textAlign: 'center',
-    marginTop: 4,
-    marginBottom: 10,
+    // marginTop: 4,
+    marginBottom: 0,
   },
   scrollContainer: {
     flex: 1,
     paddingHorizontal: 16,
   },
   dateGroup: {
-    marginBottom: 24,
+    marginBottom: 10,
   },
   dateHeader: {
     flexDirection: 'row',
@@ -578,16 +580,16 @@ const styles = StyleSheet.create({
     marginBottom: 12,
     paddingVertical: 8,
     borderBottomWidth: 1,
-    borderBottomColor: '#E0E0E0',
+    borderBottomColor: '#4d3671ff',
   },
   dateText: {
     fontSize: 16,
-    fontWeight: '600',
-    color: '#4A6FA5',
+    fontWeight: 'bold',
+    color: '#2a4976ff',
     marginLeft: 8,
   },
   logCardContainer: {
-    marginBottom: 16,
+    marginBottom: 10,
     shadowColor: '#000',
     shadowOffset: { width: 0, height: 2 },
     shadowOpacity: 0.1,
@@ -598,8 +600,8 @@ const styles = StyleSheet.create({
     backgroundColor: '#FFF',
     borderRadius: 12,
     padding: 16,
-    borderWidth: 1,
-    borderColor: '#E0E0E0',
+    borderWidth: 2,
+    borderColor: '#e0e0e0ff',
   },
   activeLogCard: {
     borderColor: '#4CAF50',
@@ -610,7 +612,7 @@ const styles = StyleSheet.create({
     flexDirection: 'row',
     justifyContent: 'space-between',
     alignItems: 'center',
-    marginBottom: 12,
+    marginBottom: 2,
   },
   logHeaderLeft: {
     flexDirection: 'row',
@@ -624,7 +626,7 @@ const styles = StyleSheet.create({
   wifiIcon: {
     padding: 4,
     borderRadius: 10,
-    backgroundColor: 'rgba(0,0,0,0.05)',
+    backgroundColor: 'rgba(26, 4, 4, 0.11)',
   },
   sessionText: {
     fontSize: 14,
@@ -653,14 +655,14 @@ const styles = StyleSheet.create({
   visitsCount: {
     flexDirection: 'row',
     alignItems: 'center',
-    marginTop: 12,
+    marginTop: 2,
     paddingTop: 8,
     borderTopWidth: 1,
     borderTopColor: '#EEE',
   },
   visitsCountText: {
     fontSize: 13,
-    color: '#4A6FA5',
+    color: '#2d4a76ff',
     marginLeft: 8,
     fontWeight: '500',
   },
@@ -748,11 +750,12 @@ const styles = StyleSheet.create({
   },
   visit: {
     backgroundColor: '#FFFFFF',
-    borderRadius: 8,
-    padding: 12,
-    marginBottom: 15,
-    borderLeftWidth: 4,
-    borderLeftColor: '#4A6FA5',
+    borderBottomLeftRadius:29,
+    borderBottomRightRadius:29,
+    padding: 10,
+    marginBottom: 10,
+    borderTopWidth: 2,
+    borderTopColor: '#4A6FA5',
     shadowColor: '#000',
     shadowOffset: { width: 0, height: 1 },
     shadowOpacity: 0.1,
@@ -762,7 +765,7 @@ const styles = StyleSheet.create({
   visitHeader: {
     flexDirection: 'row',
     alignItems: 'center',
-    marginBottom: 4,
+    // marginBottom: 4,
   },
   visitText: {
     fontSize: 15,
@@ -774,13 +777,13 @@ const styles = StyleSheet.create({
     fontSize: 12,
     color: '#666',
     marginLeft: 24,
-    marginBottom: 6,
+    // marginBottom: 6,
   },
   filtersBox: {
     backgroundColor: '#F5F7FA',
     padding: 10,
     borderRadius: 6,
-    marginTop: 8,
+    marginTop: 5,
   },
   filtersTitle: {
     fontWeight: 'bold',
@@ -795,7 +798,7 @@ const styles = StyleSheet.create({
     marginBottom: 4,
   },
   filtersText: {
-    fontSize: 12,
+    fontSize: 14,
     color: '#555',
     marginLeft: 6,
   },
@@ -842,18 +845,19 @@ const styles = StyleSheet.create({
   modalContainer: {
     flex: 1,
     backgroundColor: '#F8F9FA',
-    margin: 20,
-    borderRadius: 20,
+    margin: 25,
     overflow: 'hidden',
     shadowColor: '#000',
     shadowOffset: { width: 0, height: 10 },
     shadowOpacity: 0.3,
     shadowRadius: 20,
     elevation: 10,
+    borderTopLeftRadius:30,
+    borderTopRightRadius:30
   },
   modalHeader: {
     backgroundColor: '#4A6FA5',
-    padding: 16,
+    padding: 14,
     flexDirection: 'row',
     justifyContent: 'space-between',
     alignItems: 'center',
@@ -886,13 +890,13 @@ const styles = StyleSheet.create({
   },
   modalScroll: {
     flex: 1,
-    padding: 16,
+    padding: 10,
   },
   sessionInfo: {
     backgroundColor: '#FFF',
     borderRadius: 12,
-    padding: 16,
-    marginBottom: 16,
+    padding: 15,
+    marginBottom: 6,
     shadowColor: '#000',
     shadowOffset: { width: 0, height: 2 },
     shadowOpacity: 0.05,
@@ -902,7 +906,7 @@ const styles = StyleSheet.create({
   infoRow: {
     flexDirection: 'row',
     alignItems: 'center',
-    marginBottom: 12,
+    marginBottom: 7,
   },
   infoText: {
     fontSize: 15,
@@ -922,7 +926,7 @@ const styles = StyleSheet.create({
   sectionHeader: {
     flexDirection: 'row',
     alignItems: 'center',
-    marginBottom: 16,
+    marginBottom: 10,
   },
   sectionTitle: {
     fontSize: 18,

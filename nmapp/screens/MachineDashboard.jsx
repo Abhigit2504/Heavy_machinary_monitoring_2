@@ -14,6 +14,7 @@ import {
   Pressable,
 } from 'react-native';
 import AsyncStorage from '@react-native-async-storage/async-storage';
+import MaterialCommunityIcons from '@expo/vector-icons/MaterialCommunityIcons';
 import axios from 'axios';
 import { Ionicons } from '@expo/vector-icons';
 import dayjs from 'dayjs';
@@ -287,7 +288,8 @@ const MachineDashboard = ({ navigation }) => {
           onPress={() => navigation.navigate('MachineDetail', { gfrid: item.gfrid })}
           activeOpacity={0.9}
         >
-          <Text style={styles.cardText}>GFRID: {item.gfrid}</Text>
+          <Text style={styles.cardText}>
+            <MaterialCommunityIcons name="engine" size={24} color="black" /> GFRID: {item.gfrid}</Text>
           <Text style={styles.cardSub}>Status: {item.status || 'N/A'}</Text>
           <Text style={styles.cardSub}>Last Seen: {formatTimestamp(item.last_seen)}</Text>
         </TouchableOpacity>
