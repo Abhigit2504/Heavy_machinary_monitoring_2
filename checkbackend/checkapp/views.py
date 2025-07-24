@@ -2,7 +2,6 @@
 
 
 
-
 from django.http import JsonResponse
 from django.views.decorators.csrf import csrf_exempt
 from django.utils import timezone
@@ -138,6 +137,15 @@ from django.db import models
 import traceback
 
 
+from django.http import JsonResponse
+from django.views.decorators.csrf import csrf_exempt
+from django.utils.timezone import now, is_naive
+from datetime import timedelta
+from .models import MachineEvent
+import pandas as pd
+import pytz
+import traceback
+
 @csrf_exempt
 def machine_status(request):
     try:
@@ -150,31 +158,71 @@ def machine_status(request):
         tz = pytz.timezone("Asia/Kolkata")
         now_dt = now()
 
-        from_date = pd.to_datetime(from_date_raw, errors='coerce') if from_date_raw else now_dt - timedelta(hours=1)
-        to_date = pd.to_datetime(to_date_raw, errors='coerce') if to_date_raw else now_dt
+        # Default to last hour
+        if not from_date_raw and not to_date_raw:
+            from_date = now_dt - timedelta(hours=1)
+            to_date = now_dt
+        else:
+            from_date = pd.to_datetime(from_date_raw, errors='coerce') if from_date_raw else now_dt - timedelta(hours=1)
+            to_date = pd.to_datetime(to_date_raw, errors='coerce') if to_date_raw else now_dt
 
         if is_naive(from_date): from_date = tz.localize(from_date)
         if is_naive(to_date): to_date = tz.localize(to_date)
         if from_date >= to_date:
             to_date = from_date + timedelta(minutes=1)
 
-        # ✅ Include events overlapping with selected window
+        # Filter strictly within the time window
         qs = MachineEvent.objects.filter(
-            GFRID=gfrid
-        ).filter(
+            GFRID=gfrid,
+            TS__gte=from_date,
             TS__lte=to_date
         ).filter(
             models.Q(TS_OFF__isnull=True) | models.Q(TS_OFF__gte=from_date)
-        )
+        ).order_by('TS')
 
         df = pd.DataFrame(list(qs.values('id', 'status', 'TS', 'TS_OFF')))
+
+        # If no data found, return full OFF record for the time range
         if df.empty:
-            return JsonResponse({'on_time_sec': 0, 'off_time_sec': 0, 'status_records': []})
+            gap_sec = (to_date - from_date).total_seconds()
+            return JsonResponse({
+                'on_time_sec': 0,
+                'off_time_sec': gap_sec,
+                'status_records': [{
+                    'id': None,
+                    'status': 0,
+                    'start_time': from_date.astimezone(pytz.utc).isoformat(),
+                    'end_time': to_date.astimezone(pytz.utc).isoformat(),
+                    'duration_sec': gap_sec
+                }],
+                'telemetry_keys': [],
+                'latest_telemetry': {},
+                'time_periods': {}
+            })
 
         df['TS'] = pd.to_datetime(df['TS'], errors='coerce')
+        df['TS'] = pd.to_datetime(df['TS'], errors='coerce')
         df['TS_OFF'] = pd.to_datetime(df['TS_OFF'], errors='coerce')
-        df['end_time'] = df['TS_OFF'].combine_first(df['TS'].shift(-1))
-        df['end_time'] = df['end_time'].fillna(to_date)
+        df['next_TS'] = df['TS'].shift(-1)
+
+        # Apply the 3 rules:
+        # 1. Use TS_OFF if it exists
+        # 2. Else, use next row's TS if it exists
+        # 3. Else, fallback to to_date
+        def resolve_ts_off(row):
+            if pd.notna(row['TS_OFF']):
+                return row['TS_OFF']
+            elif pd.notna(row['next_TS']):
+                return row['next_TS']
+            else:
+                return to_date
+
+        df['TS_OFF'] = df.apply(resolve_ts_off, axis=1)
+
+
+
+        # Now, set end_time using the finalized TS_OFF
+        df['end_time'] = df['TS_OFF']
 
         records = []
         total_on = 0
@@ -188,6 +236,7 @@ def machine_status(request):
             ts = row['TS'].astimezone(pytz.utc)
             te = row['end_time'].astimezone(pytz.utc)
 
+            # Gap before current event = OFF
             if prev_end and ts > prev_end:
                 gap_duration = (ts - prev_end).total_seconds()
                 total_off += gap_duration
@@ -199,9 +248,9 @@ def machine_status(request):
                     'duration_sec': gap_duration
                 })
 
+            # Actual overlap duration
             overlap_start = max(ts, from_date.astimezone(pytz.utc))
             overlap_end = min(te, to_date.astimezone(pytz.utc))
-
             if overlap_start >= overlap_end:
                 prev_end = te
                 continue
@@ -222,6 +271,7 @@ def machine_status(request):
 
             prev_end = te
 
+        # Remaining time after last event
         if prev_end < to_date:
             gap_duration = (to_date.astimezone(pytz.utc) - prev_end).total_seconds()
             total_off += gap_duration
@@ -232,7 +282,8 @@ def machine_status(request):
                 'end_time': to_date.astimezone(pytz.utc).isoformat(),
                 'duration_sec': gap_duration
             })
- # ✅ Extract telemetry keys and latest value in time range
+
+        # TELEMETRY
         telemetry_events = MachineEvent.objects.filter(
             GFRID=gfrid,
             TS__range=(from_date, to_date)
@@ -244,23 +295,76 @@ def machine_status(request):
         for event in telemetry_events:
             json_data = event.jsonFile or {}
             telemetry_keys_set.update(json_data.keys())
-
-            # capture the first (latest) non-empty
             if not latest_telemetry:
                 latest_telemetry = json_data
 
+        # TIME PERIODS
+        time_periods = {}
+        for hours in [1, 6, 24]:
+            p_from = now_dt - timedelta(hours=hours)
+            p_to = now_dt
+            on = off = 0
+            p_qs = MachineEvent.objects.filter(
+                GFRID=gfrid,
+                TS__gte=p_from,
+                TS__lte=p_to
+            ).filter(
+                models.Q(TS_OFF__isnull=True) | models.Q(TS_OFF__gte=p_from)
+            ).order_by('TS')
+
+            pdf = pd.DataFrame(list(p_qs.values('id', 'status', 'TS', 'TS_OFF')))
+            if not pdf.empty:
+                pdf['TS'] = pd.to_datetime(pdf['TS'], errors='coerce')
+                pdf['TS_OFF'] = pd.to_datetime(pdf['TS_OFF'], errors='coerce')
+                pdf['end_time'] = pdf['TS_OFF'].combine_first(pdf['TS'].shift(-1))
+                pdf['end_time'] = pdf['end_time'].fillna(p_to)
+                prev_end_p = p_from
+                for _, row in pdf.iterrows():
+                    if pd.isna(row['TS']) or pd.isna(row['end_time']):
+                        continue
+                    ts = row['TS'].astimezone(pytz.utc)
+                    te = row['end_time'].astimezone(pytz.utc)
+
+                    if prev_end_p and ts > prev_end_p:
+                        gap = (ts - prev_end_p).total_seconds()
+                        off += gap
+
+                    overlap_start = max(ts, p_from.astimezone(pytz.utc))
+                    overlap_end = min(te, p_to.astimezone(pytz.utc))
+                    if overlap_start < overlap_end:
+                        dur = (overlap_end - overlap_start).total_seconds()
+                        if row['status'] == 1:
+                            on += dur
+                        else:
+                            off += dur
+
+                    prev_end_p = te
+
+                if prev_end_p < p_to:
+                    gap = (p_to.astimezone(pytz.utc) - prev_end_p).total_seconds()
+                    off += gap
+
+            time_periods[f'last_{hours}_hours'] = {
+                'on_time_sec': on,
+                'off_time_sec': off,
+                'on_time_percentage': round(on / (on + off) * 100, 2) if (on + off) > 0 else 0
+            }
+
+        # FINAL RESPONSE
         return JsonResponse({
             'on_time_sec': total_on,
             'off_time_sec': total_off,
             'status_records': records,
             'telemetry_keys': sorted(list(telemetry_keys_set)),
-            'latest_telemetry': latest_telemetry
+            'latest_telemetry': latest_telemetry,
+            'time_periods': time_periods
         })
 
     except Exception as e:
         print("❌ ERROR:", e)
         print(traceback.format_exc())
         return JsonResponse({'error': str(e), 'trace': traceback.format_exc()}, status=500)
+
 
 
 @csrf_exempt
@@ -272,7 +376,21 @@ def movement_analysis(request):
 
         from_date = request.GET.get("from_date")
         to_date = request.GET.get("to_date")
-        df = load_machine_data(gfrid, from_date, to_date)
+        tz = pytz.timezone("Asia/Kolkata")
+
+        # Parse and validate dates
+        from_dt = pd.to_datetime(from_date, utc=True) if from_date else None
+        to_dt = pd.to_datetime(to_date, utc=True) if to_date else None
+        
+        if not from_dt or not to_dt:
+            return JsonResponse({'error': 'Valid from_date and to_date required'}, status=400)
+
+        # Convert to IST
+        from_dt = from_dt.astimezone(tz)
+        to_dt = to_dt.astimezone(tz)
+
+        # Get movement data
+        df = load_machine_data(gfrid, from_dt.isoformat(), to_dt.isoformat())
 
         if df.empty:
             return JsonResponse({'movements': []})
@@ -284,27 +402,41 @@ def movement_analysis(request):
             if pd.isna(row['TS_BigInt']) or pd.isna(row['TS_OFF_BigInt']):
                 continue
 
-            start_utc = row['TS_BigInt'].astimezone(pytz.utc)
-            end_utc = row['TS_OFF_BigInt'].astimezone(pytz.utc)
+            # Convert to IST timezone
+            start_time = row['TS_BigInt'].astimezone(tz)
+            end_time = row['TS_OFF_BigInt'].astimezone(tz)
 
-            movement_label = row.get('movement')
-            if not isinstance(movement_label, str) or movement_label.strip() == "":
-                movement_label = f"alert_{int(row.get('alertNotify_id') or 0)}" if pd.notna(row.get('alertNotify_id')) else f"alert_{row['alert']}"
+            # Calculate actual overlap with requested time range
+            overlap_start = max(start_time, from_dt)
+            overlap_end = min(end_time, to_dt)
 
-            movement_records.append({
-                'id': row['id'],
-                'alert': row['alert'],
-                'movement': movement_label,
-                'start_time': start_utc.isoformat(),
-                'end_time': end_utc.isoformat(),
-                'duration': (end_utc - start_utc).total_seconds(),
-                'alertNotify_id': row.get('alertNotify_id')
-            })
+            # Only include if there's actual overlap
+            if overlap_start < overlap_end:
+                duration = (overlap_end - overlap_start).total_seconds()
+                
+                movement_label = row.get('movement')
+                if not isinstance(movement_label, str) or movement_label.strip() == "":
+                    movement_label = f"alert_{int(row.get('alertNotify_id') or 0)}" if pd.notna(row.get('alertNotify_id')) else f"alert_{row['alert']}"
+
+                movement_records.append({
+                    'id': row['id'],
+                    'alert': row['alert'],
+                    'movement': movement_label,
+                    'start_time': overlap_start.isoformat(),
+                    'end_time': overlap_end.isoformat(),
+                    'duration': duration,
+                    'alertNotify_id': row.get('alertNotify_id')
+                })
 
         return JsonResponse({'movements': movement_records})
     except Exception as e:
         return JsonResponse({'error': str(e), 'trace': traceback.format_exc()}, status=500)
 
+
+
+
+
+from django.db.models import Q
 @csrf_exempt
 def cumulative_analysis(request):
     try:
@@ -312,121 +444,221 @@ def cumulative_analysis(request):
         if not gfrid:
             return JsonResponse({'error': 'gfrid is required'}, status=400)
 
+        tz = pytz.timezone("Asia/Kolkata")
+        now_dt = now().astimezone(tz)
+
+        # Handle from/to dates
         from_date = request.GET.get("from_date")
         to_date = request.GET.get("to_date")
 
-        tz = pytz.timezone("Asia/Kolkata")
-        now_dt = now()
+        from_dt = pd.to_datetime(from_date, utc=True).astimezone(tz) if from_date else now_dt - timedelta(hours=24)
+        to_dt = pd.to_datetime(to_date, utc=True).astimezone(tz) if to_date else now_dt
 
-        from_dt = pd.to_datetime(from_date, errors='coerce') if from_date else now_dt - timedelta(hours=1)
-        to_dt = pd.to_datetime(to_date, errors='coerce') if to_date else now_dt
-
-        if is_naive(from_dt): from_dt = tz.localize(from_dt)
-        if is_naive(to_dt): to_dt = tz.localize(to_dt)
+        # Ensure to_dt is after from_dt
         if from_dt >= to_dt:
             to_dt = from_dt + timedelta(minutes=1)
 
+        print(f"\nAnalyzing from {from_dt} to {to_dt}")
+
+        # Get all events that overlap with the time range
         qs = MachineEvent.objects.filter(
+            Q(TS__lt=to_dt) & 
+            (Q(TS_OFF__gt=from_dt) | Q(TS_OFF__isnull=True)),
             GFRID=gfrid
-        ).filter(
-            TS__lte=to_dt
-        ).filter(
-            models.Q(TS_OFF__isnull=True) | models.Q(TS_OFF__gte=from_dt)
         ).order_by('TS')
 
-        df = pd.DataFrame(list(qs.values('id', 'status', 'TS', 'TS_OFF')))
+        print(f"Found {qs.count()} events")
+        for event in qs:
+            print(f"Event: {event.TS} to {event.TS_OFF} (status: {event.status})")
 
+        # Initialize timeline
+        timeline = []
+        total_duration = (to_dt - from_dt).total_seconds()
         total_on_sec = 0
         total_off_sec = 0
         on_off_records = []
 
-        if not df.empty:
-            df['TS'] = pd.to_datetime(df['TS'], errors='coerce')
-            df['TS_OFF'] = pd.to_datetime(df['TS_OFF'], errors='coerce')
-            df['end_time'] = df['TS_OFF'].combine_first(df['TS'].shift(-1))
-            df['end_time'] = df['end_time'].fillna(to_dt)
-
-            prev_end = from_dt
-            for _, row in df.iterrows():
-                if pd.isna(row['TS']) or pd.isna(row['end_time']):
-                    continue
-
-                ts = row['TS'].astimezone(pytz.utc)
-                te = row['end_time'].astimezone(pytz.utc)
-
-                if prev_end and ts > prev_end:
-                    gap = (ts - prev_end).total_seconds()
-                    total_off_sec += gap
-                    on_off_records.append({
-                        'status': 0,
-                        'start_time': prev_end.astimezone(pytz.utc).isoformat(),
-                        'end_time': ts.isoformat(),
-                        'duration_sec': gap
-                    })
-
-                overlap_start = max(ts, from_dt.astimezone(pytz.utc))
-                overlap_end = min(te, to_dt.astimezone(pytz.utc))
-                if overlap_start < overlap_end:
-                    duration = (overlap_end - overlap_start).total_seconds()
-                    if row['status'] == 1:
-                        total_on_sec += duration
-                    else:
-                        total_off_sec += duration
-
-                    on_off_records.append({
-                        'status': int(row['status']),
-                        'start_time': overlap_start.isoformat(),
-                        'end_time': overlap_end.isoformat(),
-                        'duration_sec': duration
-                    })
-
-                prev_end = te
-
-            if prev_end < to_dt:
-                off_gap = (to_dt.astimezone(pytz.utc) - prev_end).total_seconds()
-                total_off_sec += off_gap
-                on_off_records.append({
-                    'status': 0,
-                    'start_time': prev_end.isoformat(),
-                    'end_time': to_dt.astimezone(pytz.utc).isoformat(),
-                    'duration_sec': off_gap
+        # Add all events to the timeline
+        for event in qs:
+            start = max(event.TS.astimezone(tz), from_dt)
+            end = min(event.TS_OFF.astimezone(tz) if event.TS_OFF else to_dt, to_dt)
+            
+            if start < end:
+                timeline.append({
+                    'time': start,
+                    'type': 'start',
+                    'status': event.status
+                })
+                timeline.append({
+                    'time': end,
+                    'type': 'end',
+                    'status': event.status
                 })
 
-        movement_df = load_machine_data(gfrid, from_dt.isoformat(), to_dt.isoformat())
-        if not movement_df.empty:
-            movement_df['movement'] = movement_df['alert'].map(MOVEMENT_CODES)
-            movement_df['TS_BigInt'] = pd.to_datetime(movement_df['TS_BigInt'], unit='s', errors='coerce')
-            movement_df['TS_OFF_BigInt'] = pd.to_datetime(movement_df['TS_OFF_BigInt'], unit='s', errors='coerce')
+        # Sort the timeline
+        timeline.sort(key=lambda x: x['time'])
 
-            movement_df = movement_df.dropna(subset=['TS_BigInt', 'TS_OFF_BigInt'])
-            movement_df['duration'] = (movement_df['TS_OFF_BigInt'] - movement_df['TS_BigInt']).dt.total_seconds()
+        # Process the timeline to calculate on/off times
+        current_status = 0  # Assume machine starts as off
+        last_time = from_dt
+        
+        for point in timeline:
+            duration = (point['time'] - last_time).total_seconds()
+            
+            if duration > 0:
+                if current_status == 1:
+                    total_on_sec += duration
+                else:
+                    total_off_sec += duration
+                
+                on_off_records.append({
+                    'status': current_status,
+                    'start_time': last_time.isoformat(),
+                    'end_time': point['time'].isoformat(),
+                    'duration_sec': duration
+                })
+            
+            # Update current status
+            if point['type'] == 'start':
+                current_status = point['status']
+            else:  # 'end'
+                current_status = 0  # When an event ends, status returns to off
+            
+            last_time = point['time']
 
-            grouped = (
-                movement_df.groupby('alertNotify_id')['duration']
-                .sum()
-                .reset_index()
-            )
+        # Handle remaining time after last event
+        if last_time < to_dt:
+            duration = (to_dt - last_time).total_seconds()
+            total_off_sec += duration
+            
+            on_off_records.append({
+                'status': 0,
+                'start_time': last_time.isoformat(),
+                'end_time': to_dt.isoformat(),
+                'duration_sec': duration,
+                'synthetic': True
+            })
 
-            movement_summary = [
-                {
-                    'alertNotify_id': int(row['alertNotify_id']) if pd.notna(row['alertNotify_id']) else None,
-                    'duration_hr': round(row['duration'] / 3600, 2)
-                }
-                for _, row in grouped.iterrows()
-            ]
-        else:
+        # Verify totals
+        calculated_total = total_on_sec + total_off_sec
+        if abs(calculated_total - total_duration) > 1:  # Allow 1 second tolerance
+            print(f"Warning: Time mismatch! Expected {total_duration}, got {calculated_total}")
+
+        # Rest of your movement data processing...
+        movement_summary = []
+        try:
+            movement_df = load_machine_data(gfrid, from_dt.isoformat(), to_dt.isoformat())
+            
+            if not movement_df.empty:
+                movement_df['movement'] = movement_df['alert'].map(MOVEMENT_CODES)
+                movement_df['TS_BigInt'] = pd.to_datetime(movement_df['TS_BigInt'], unit='s', utc=True).dt.tz_convert(tz)
+                movement_df['TS_OFF_BigInt'] = pd.to_datetime(movement_df['TS_OFF_BigInt'], unit='s', utc=True).dt.tz_convert(tz)
+
+                movement_df = movement_df[
+                    (movement_df['TS_BigInt'] < to_dt) & 
+                    (movement_df['TS_OFF_BigInt'] > from_dt)
+                ]
+
+                movement_df['overlap_start'] = movement_df['TS_BigInt'].clip(lower=from_dt)
+                movement_df['overlap_end'] = movement_df['TS_OFF_BigInt'].clip(upper=to_dt)
+                movement_df['duration'] = (movement_df['overlap_end'] - movement_df['overlap_start']).dt.total_seconds()
+
+                movement_df = movement_df[movement_df['duration'] > 0]
+
+                grouped = movement_df.groupby('alertNotify_id')['duration'].sum().reset_index()
+                movement_summary = [
+                    {
+                        'alertNotify_id': int(row['alertNotify_id']) if pd.notna(row['alertNotify_id']) else None,
+                        'duration_hr': round(row['duration'] / 3600, 2),
+                        'duration_min': round(row['duration'] / 60, 2)
+                    }
+                    for _, row in grouped.iterrows()
+                ]
+        except Exception as e:
+            print(f"Error processing movement data: {e}")
             movement_summary = []
 
-        return JsonResponse({
+        # Prepare response
+        response = {
             'on_time_hr': round(total_on_sec / 3600, 2),
             'off_time_hr': round(total_off_sec / 3600, 2),
+            'on_time_percentage': round(total_on_sec / total_duration * 100, 2) if total_duration > 0 else 0,
             'on_off_records': on_off_records,
-            'movements_by_alertNotify': movement_summary
-        })
+            'movements_by_alertNotify': movement_summary,
+            'time_range': {
+                'from': from_dt.isoformat(),
+                'to': to_dt.isoformat(),
+                'duration_hr': round(total_duration / 3600, 2)
+            }
+        }
+
+        print("\nFinal response:")
+        print(json.dumps(response, indent=2))
+
+        return JsonResponse(response)
 
     except Exception as e:
+        print(f"Error in cumulative_analysis: {e}")
         return JsonResponse({'error': str(e), 'trace': traceback.format_exc()}, status=500)
 
+
+
+def calculate_time_period(gfrid, from_dt, to_dt):
+    """Helper function to calculate on/off times for a specific period"""
+    qs = MachineEvent.objects.filter(
+        GFRID=gfrid
+    ).filter(
+        TS__lte=to_dt
+    ).filter(
+        models.Q(TS_OFF__isnull=True) | models.Q(TS_OFF__gte=from_dt)
+    ).order_by('TS')
+
+    df = pd.DataFrame(list(qs.values('id', 'status', 'TS', 'TS_OFF')))
+    
+    total_on = 0
+    total_off = 0
+    
+    if not df.empty:
+        df['TS'] = pd.to_datetime(df['TS'], errors='coerce')
+        df['TS_OFF'] = pd.to_datetime(df['TS_OFF'], errors='coerce')
+        df['end_time'] = df['TS_OFF'].combine_first(df['TS'].shift(-1))
+        df['end_time'] = df['end_time'].fillna(to_dt)
+
+        prev_end = from_dt
+        
+        for _, row in df.iterrows():
+            if pd.isna(row['TS']) or pd.isna(row['end_time']):
+                continue
+
+            ts = row['TS'].astimezone(pytz.utc)
+            te = row['end_time'].astimezone(pytz.utc)
+
+            # Gap time (off)
+            if prev_end and ts > prev_end:
+                total_off += (ts - prev_end).total_seconds()
+
+            # Event time
+            overlap_start = max(ts, from_dt.astimezone(pytz.utc))
+            overlap_end = min(te, to_dt.astimezone(pytz.utc))
+            if overlap_start < overlap_end:
+                duration = (overlap_end - overlap_start).total_seconds()
+                if row['status'] == 1:
+                    total_on += duration
+                else:
+                    total_off += duration
+
+            prev_end = te
+
+        # Remaining time after last event (off)
+        if prev_end < to_dt:
+            total_off += (to_dt.astimezone(pytz.utc) - prev_end).total_seconds()
+
+    return {
+        'on_time_hr': round(total_on / 3600, 2),
+        'off_time_hr': round(total_off / 3600, 2),
+        'on_time_percentage': round(total_on / (total_on + total_off) * 100, 2) 
+                            if (total_on + total_off) > 0 else 0
+    }
 
 
 @csrf_exempt
@@ -435,54 +667,136 @@ def prioritized_machine_usage(request):
         tz = pytz.timezone("Asia/Kolkata")
         now_dt = now()
 
+        # Parse input parameters
         from_raw = request.GET.get("from_date")
         to_raw = request.GET.get("to_date")
+        interval_minutes = int(request.GET.get("interval", 0))  # in minutes
 
+        # Handle date parsing with timezone awareness
         from_dt = pd.to_datetime(from_raw, errors='coerce', utc=True)
         to_dt = pd.to_datetime(to_raw, errors='coerce', utc=True)
 
+        # Set defaults if not provided
         if pd.isna(from_dt):
             from_dt = now_dt - timedelta(hours=1)
-
         if pd.isna(to_dt):
             to_dt = now_dt
 
+        # Ensure timezone awareness
         if is_naive(from_dt):
             from_dt = make_aware(from_dt)
         if is_naive(to_dt):
             to_dt = make_aware(to_dt)
 
+        # Validate time range
         if from_dt >= to_dt:
             to_dt = from_dt + timedelta(minutes=1)
 
         total_time_range_sec = (to_dt - from_dt).total_seconds()
 
+        # Get all machine GFRIDs
         all_gfrids = MachineEvent.objects.values_list("GFRID", flat=True).distinct()
-        result = []
+        
+        # Prepare results structure
+        result = {
+            "time_range": {
+                "from": from_dt.astimezone(tz).isoformat(),
+                "to": to_dt.astimezone(tz).isoformat(),
+                "total_seconds": total_time_range_sec,
+                "total_hours": round(total_time_range_sec / 3600, 2)
+            },
+            "machines": [],
+            "aggregate": {
+                "total_on_sec": 0,
+                "total_off_sec": 0,
+                "on_percent": 0.0,
+                "off_percent": 0.0,
+                "utilization_percent": 0.0
+            },
+            "time_intervals": [] if interval_minutes > 0 else None
+        }
 
+        # Process each machine
         for gfrid in all_gfrids:
             events = MachineEvent.objects.filter(GFRID=gfrid).order_by("TS")
             df = pd.DataFrame(list(events.values("status", "TS", "TS_OFF")))
 
             if df.empty:
-                result.append({
+                machine_data = {
                     "gfrid": gfrid,
                     "on_sec": 0,
                     "off_sec": total_time_range_sec,
                     "on_percent": 0.0,
-                    "off_percent": 100.0
-                })
+                    "off_percent": 100.0,
+                    "utilization_percent": 0.0,
+                    "time_intervals": [] if interval_minutes > 0 else None
+                }
+                result["machines"].append(machine_data)
                 continue
 
+            # Convert and clean timestamps
             df["TS"] = pd.to_datetime(df["TS"], errors="coerce")
             df["TS_OFF"] = pd.to_datetime(df["TS_OFF"], errors="coerce")
             df["end_time"] = df["TS_OFF"].combine_first(df["TS"].shift(-1))
             df["end_time"] = df["end_time"].fillna(to_dt)
 
+            # Initialize time tracking
             total_on = 0
             total_off = 0
             prev_end = from_dt
+            interval_data = []
 
+            # If interval analysis is requested
+            if interval_minutes > 0:
+                current_interval_start = from_dt
+                while current_interval_start < to_dt:
+                    current_interval_end = min(
+                        current_interval_start + timedelta(minutes=interval_minutes),
+                        to_dt
+                    )
+                    interval_on = 0
+                    interval_off = 0
+
+                    for _, row in df.iterrows():
+                        ts = row["TS"]
+                        te = row["end_time"]
+
+                        if pd.isna(ts) or pd.isna(te):
+                            continue
+
+                        ts = make_aware(ts) if is_naive(ts) and pd.notna(ts) else ts
+                        te = make_aware(te) if is_naive(te) and pd.notna(te) else te
+
+                        ts = ts.astimezone(pytz.utc)
+                        te = te.astimezone(pytz.utc)
+
+                        # Calculate overlap with current interval
+                        overlap_start = max(ts, current_interval_start)
+                        overlap_end = min(te, current_interval_end)
+                        
+                        if overlap_start < overlap_end:
+                            dur = (overlap_end - overlap_start).total_seconds()
+                            if row["status"] == 1:
+                                interval_on += dur
+                            else:
+                                interval_off += dur
+
+                    # Handle gaps between events
+                    interval_off += max(0, (current_interval_end - current_interval_start).total_seconds() - interval_on)
+
+                    interval_data.append({
+                        "start": current_interval_start.astimezone(tz).isoformat(),
+                        "end": current_interval_end.astimezone(tz).isoformat(),
+                        "on_sec": round(interval_on, 2),
+                        "off_sec": round(interval_off, 2),
+                        "on_percent": round((interval_on / (interval_on + interval_off)) * 100, 2) if (interval_on + interval_off) > 0 else 0.0,
+                        "off_percent": round((interval_off / (interval_on + interval_off)) * 100, 2) if (interval_on + interval_off) > 0 else 0.0
+                    })
+
+                    current_interval_start = current_interval_end
+
+            # Calculate totals for the entire period
+            prev_end = from_dt
             for _, row in df.iterrows():
                 ts = row["TS"]
                 te = row["end_time"]
@@ -496,10 +810,12 @@ def prioritized_machine_usage(request):
                 ts = ts.astimezone(pytz.utc)
                 te = te.astimezone(pytz.utc)
 
+                # Handle gaps between events
                 if prev_end and ts > prev_end:
                     gap = (ts - prev_end).total_seconds()
                     total_off += gap
 
+                # Calculate overlap with our time range
                 overlap_start = max(ts, from_dt.astimezone(pytz.utc))
                 overlap_end = min(te, to_dt.astimezone(pytz.utc))
                 if overlap_start < overlap_end:
@@ -511,24 +827,72 @@ def prioritized_machine_usage(request):
 
                 prev_end = te
 
+            # Handle remaining time after last event
             if prev_end < to_dt:
                 total_off += (to_dt.astimezone(pytz.utc) - prev_end).total_seconds()
 
-            result.append({
+            # Calculate percentages
+            total_time = total_on + total_off
+            on_percent = round((total_on / total_time) * 100, 2) if total_time > 0 else 0.0
+            off_percent = round(100 - on_percent, 2)
+
+            machine_data = {
                 "gfrid": gfrid,
                 "on_sec": round(total_on, 2),
                 "off_sec": round(total_off, 2),
-                "on_percent": 0.0,
-                "off_percent": 0.0
-            })
+                "on_percent": on_percent,
+                "off_percent": off_percent,
+                "utilization_percent": on_percent,  # Same as on_percent in this context
+                "time_intervals": interval_data if interval_minutes > 0 else None
+            }
+            
+            result["machines"].append(machine_data)
+            result["aggregate"]["total_on_sec"] += total_on
+            result["aggregate"]["total_off_sec"] += total_off
 
-        total_on_sec_all = sum(m['on_sec'] for m in result) or 1
+        # Calculate aggregate statistics
+        total_all_machines = result["aggregate"]["total_on_sec"] + result["aggregate"]["total_off_sec"]
+        if total_all_machines > 0:
+            result["aggregate"]["on_percent"] = round((result["aggregate"]["total_on_sec"] / total_all_machines) * 100, 2)
+            result["aggregate"]["off_percent"] = round(100 - result["aggregate"]["on_percent"], 2)
+            result["aggregate"]["utilization_percent"] = result["aggregate"]["on_percent"]
 
-        for r in result:
-            r['on_percent'] = round((r['on_sec'] / total_on_sec_all) * 100, 2)
-            r['off_percent'] = round(100 - r['on_percent'], 2)
+        # Calculate relative usage percentages among machines
+        total_on_all_machines = result["aggregate"]["total_on_sec"] or 1  # avoid division by zero
+        for machine in result["machines"]:
+            machine["relative_usage_percent"] = round((machine["on_sec"] / total_on_all_machines) * 100, 2)
 
-        result.sort(key=lambda x: x["on_sec"], reverse=True)
+        # Sort machines by usage
+        result["machines"].sort(key=lambda x: x["on_sec"], reverse=True)
+
+        # If interval analysis is requested, add aggregate interval data
+        if interval_minutes > 0 and result["machines"] and result["machines"][0]["time_intervals"]:
+            result["time_intervals"] = []
+            for i in range(len(result["machines"][0]["time_intervals"])):
+                interval_agg = {
+                    "start": result["machines"][0]["time_intervals"][i]["start"],
+                    "end": result["machines"][0]["time_intervals"][i]["end"],
+                    "total_on_sec": 0,
+                    "total_off_sec": 0,
+                    "machines_on": 0,
+                    "machines_off": 0
+                }
+                
+                for machine in result["machines"]:
+                    interval = machine["time_intervals"][i]
+                    interval_agg["total_on_sec"] += interval["on_sec"]
+                    interval_agg["total_off_sec"] += interval["off_sec"]
+                    if interval["on_sec"] > 0:
+                        interval_agg["machines_on"] += 1
+                    else:
+                        interval_agg["machines_off"] += 1
+                
+                interval_agg["on_percent"] = round(
+                    (interval_agg["total_on_sec"] / (interval_agg["total_on_sec"] + interval_agg["total_off_sec"])) * 100, 2
+                ) if (interval_agg["total_on_sec"] + interval_agg["total_off_sec"]) > 0 else 0.0
+                
+                interval_agg["off_percent"] = round(100 - interval_agg["on_percent"], 2)
+                result["time_intervals"].append(interval_agg)
 
         return JsonResponse(result, safe=False)
 
@@ -537,7 +901,6 @@ def prioritized_machine_usage(request):
             "error": str(e),
             "trace": traceback.format_exc()
         }, status=500)
-
 
 
 

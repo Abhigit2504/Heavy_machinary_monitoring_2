@@ -45,17 +45,35 @@ export const getAuthHeaders = async () => {
 
 // Fetch Logs
 export const fetchLogs = async () => {
-  const headers = await getAuthHeaders();
-  if (!headers) {
-    console.warn('⚠️ Skipping fetchLogs, no auth headers');
-    return [];
-  }
-
   try {
-    const res = await axios.get(`${BASE_URL}/api/auth/logs/`, headers);
-    return res.data;
-  } catch (err) {
-    console.error('❌ Error fetching logs:', err);
+    const headers = await getAuthHeaders();
+    if (!headers) {
+      console.warn('⚠️ No auth headers available');
+      return [];
+    }
+
+    console.log('📡 Making request to:', `${BASE_URL}/api/auth/logs/`);
+    const startTime = Date.now();
+    const response = await axios.get(`${BASE_URL}/api/auth/logs/`, {
+      ...headers,
+      timeout: 10000 // 10 second timeout
+    });
+    
+    console.log(`⏱️ Request took ${Date.now() - startTime}ms`);
+    console.log('📦 Response data:', response.data);
+
+    if (!response.data) {
+      console.warn('⚠️ Empty response data');
+      return [];
+    }
+
+    return Array.isArray(response.data) ? response.data : [];
+  } catch (error) {
+    console.error('❌ fetchLogs error:', {
+      message: error.message,
+      response: error.response?.data,
+      status: error.response?.status
+    });
     return [];
   }
 };

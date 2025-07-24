@@ -9,141 +9,62 @@ import {
   ActivityIndicator,
   Animated,
   Easing,
-  Dimensions,
   ScrollView,
-  Pressable,
+  Dimensions,
 } from 'react-native';
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import MaterialCommunityIcons from '@expo/vector-icons/MaterialCommunityIcons';
-import axios from 'axios';
 import { Ionicons } from '@expo/vector-icons';
+import axios from 'axios';
 import dayjs from 'dayjs';
-import customParseFormat from 'dayjs/plugin/customParseFormat';
+import { LinearGradient } from 'expo-linear-gradient';
 import { BASE_URL } from '../config';
-import { recordVisit } from '../api/LogsApi';
-import CustomDonutChart from '../components/CustomDonutChart';
 
-dayjs.extend(customParseFormat);
-const screenWidth = Dimensions.get('window').width;
+const { width } = Dimensions.get('window');
 
-const CustomBarChart = ({ data, scrollViewRef }) => {
-  const barHeights = useRef(data.map(() => new Animated.Value(0))).current;
-  const [scrollX, setScrollX] = useState(0);
-
-  useEffect(() => {
-    const animations = data.map((_, i) =>
-      Animated.timing(barHeights[i], {
-        toValue: data[i].value,
-        duration: 600,
-        delay: i * 120,
-        useNativeDriver: false,
-      })
-    );
-    Animated.stagger(100, animations).start();
-  }, [data]);
-
-  const scrollTo = (direction) => {
-    const newOffset = direction === 'right' ? scrollX + 150 : scrollX - 150;
-    scrollViewRef.current?.scrollTo({ x: newOffset, animated: true });
-    setScrollX(newOffset);
-  };
-
-  return (
-    <View style={{ width: '100%', position: 'relative' }}>
-      <TouchableOpacity style={styles.scrollButtonLeft} onPress={() => scrollTo('left')}>
-        <Ionicons name="chevron-back" size={24} color="#3B82F6" />
-      </TouchableOpacity>
-
-      <ScrollView
-        ref={scrollViewRef}
-        horizontal
-        showsHorizontalScrollIndicator={false}
-        onScroll={(event) => {
-          setScrollX(event.nativeEvent.contentOffset.x);
-        }}
-        scrollEventThrottle={16}
-        contentContainerStyle={{
-          flexDirection: 'row',
-          paddingVertical: 20,
-          paddingHorizontal: 40,
-          minWidth: data.length * 80,
-        }}
-      >
-        {data.map((item, i) => (
-          <View
-            key={i}
-            style={{
-              alignItems: 'center',
-              marginHorizontal: 12,
-              width: 60,
-            }}
-          >
-            <Animated.View
-              style={{
-                height: barHeights[i].interpolate({
-                  inputRange: [0, 100],
-                  outputRange: [0, 180],
-                }),
-                width: 26,
-                backgroundColor: item.color,
-                borderRadius: 6,
-                shadowColor: '#000',
-                shadowOffset: { width: 0, height: 2 },
-                shadowOpacity: 0.2,
-                shadowRadius: 4,
-              }}
-            />
-            <Text style={{ fontSize: 12, marginTop: 6, color: '#1F2937', textAlign: 'center' }}>
-              {item.label}
-            </Text>
-            <Text style={{ fontSize: 12, color: '#475569' }}>{item.value}%</Text>
-          </View>
-        ))}
-      </ScrollView>
-
-      <TouchableOpacity style={styles.scrollButtonRight} onPress={() => scrollTo('right')}>
-        <Ionicons name="chevron-forward" size={24} color="#3B82F6" />
-      </TouchableOpacity>
-    </View>
-  );
+// Sophisticated color palette
+const COLORS = {
+  primaryDark: '#1A365D',       // Deep navy (trust, intelligence)
+  primaryLight: '#2C5282',      // Medium navy
+  success: '#2F855A',           // Forest green
+  successLight: '#38A169',      // Emerald green
+  warning: '#C05621',           // Burnt orange
+  warningLight: '#DD6B20',      // Bright orange
+  error: '#9B2C2C',            // Deep red
+  errorLight: '#C53030',       // Bright red
+  neutral: '#4A5568',          // Slate gray
+  neutralLight: '#718096',     // Light slate
+  background: '#F8FAFC',       // Very light gray
+  cardBg: '#FFFFFF',           // Pure white
+  textDark: '#1A202C',         // Near black
+  textMedium: '#4A5568',       // Medium gray
+  textLight: '#718096',        // Light gray
+  border: '#E2E8F0',           // Light border
 };
 
 const MachineDashboard = ({ navigation }) => {
   const [machines, setMachines] = useState([]);
-  const [priorityUsage, setPriorityUsage] = useState([]);
+  const [machineStatusMap, setMachineStatusMap] = useState({});
   const [searchGfrid, setSearchGfrid] = useState('');
   const [loading, setLoading] = useState(true);
   const [user, setUser] = useState(null);
   const [typedText, setTypedText] = useState('');
   const fadeAnim = useRef(new Animated.Value(1)).current;
   const slideAnim = useRef(new Animated.Value(-30)).current;
-  const chartAnim = useRef(new Animated.Value(1)).current;
   const cardAnimations = useRef([]).current;
   const fullTextRef = useRef('');
-  const scrollViewRef = useRef(null);
-  const [showChart, setShowChart] = useState(true);
+  const refreshIntervalRef = useRef(null);
 
-  useEffect(() => {
-    const debugUserStorage = async () => {
-      const raw = await AsyncStorage.getItem('user');
-      console.log("🧠 DEBUG user from AsyncStorage:", raw);
-    };
-    debugUserStorage();
-  }, []);
-
-  useEffect(() => {
-    const fetchUser = async () => {
-      const userData = await AsyncStorage.getItem('user');
-      if (userData) {
-        const parsed = JSON.parse(userData);
-        setUser(parsed);
-        fullTextRef.current = `Welcome, ${parsed.first_name} ${parsed.last_name}!`;
-        typeText();
-        animateWelcome();
-      }
-    };
-    fetchUser();
-  }, []);
+  const fetchUser = async () => {
+    const userData = await AsyncStorage.getItem('user');
+    if (userData) {
+      const parsed = JSON.parse(userData);
+      setUser(parsed);
+      fullTextRef.current = `Welcome, ${parsed.first_name} ${parsed.last_name}!`;
+      typeText();
+      animateWelcome();
+    }
+  };
 
   const typeText = () => {
     let i = 0;
@@ -174,23 +95,38 @@ const MachineDashboard = ({ navigation }) => {
     ]).start();
   };
 
+  const fetchStatusData = async (gfrid) => {
+    try {
+      const response = await axios.get(`${BASE_URL}/api/machine-status/?gfrid=${gfrid}`);
+      const { time_periods } = response.data;
+      if (time_periods?.last_1_hours) {
+        return {
+          ...time_periods.last_1_hours,
+          on_time_percentage: time_periods.last_1_hours.on_time_percentage || 0,
+          on_time_sec: time_periods.last_1_hours.on_time_sec || 0,
+        };
+      }
+      return null;
+    } catch (err) {
+      console.error(`Failed fetching status for GFRID ${gfrid}`, err.message);
+      return null;
+    }
+  };
+
   const fetchMachines = async () => {
     try {
-      setLoading(true);
-      const [machineRes, priorityRes] = await Promise.all([
-        axios.get(`${BASE_URL}/api/machines/`),
-        axios.get(`${BASE_URL}/api/priority-usage/`),
-      ]);
-      setMachines(machineRes.data);
-      setPriorityUsage(priorityRes.data);
-      setShowChart(true);
-      chartAnim.setValue(0);
-      Animated.timing(chartAnim, {
-        toValue: 1,
-        duration: 400,
-        useNativeDriver: true,
-        easing: Easing.out(Easing.exp),
-      }).start();
+      const res = await axios.get(`${BASE_URL}/api/machines/`);
+      const machineList = res.data;
+
+      setMachines(machineList);
+
+      const statusMap = {};
+      await Promise.all(machineList.map(async (m) => {
+        const status = await fetchStatusData(m.gfrid);
+        if (status) statusMap[m.gfrid] = status;
+      }));
+
+      setMachineStatusMap(statusMap);
     } catch (err) {
       console.error(err);
     } finally {
@@ -199,58 +135,21 @@ const MachineDashboard = ({ navigation }) => {
   };
 
   useEffect(() => {
+    fetchUser();
     fetchMachines();
+
+    refreshIntervalRef.current = setInterval(fetchMachines, 3000);
+
+    return () => {
+      if (refreshIntervalRef.current) {
+        clearInterval(refreshIntervalRef.current);
+      }
+    };
   }, []);
-
-  const hidePieChart = () => {
-    Animated.sequence([
-      // First, scale up slightly
-      Animated.timing(chartAnim, {
-        toValue: 1.2,
-        duration: 150,
-        useNativeDriver: true,
-      }),
-      // Then explode outward while fading
-      Animated.parallel([
-        Animated.timing(chartAnim, {
-          toValue: 0,
-          duration: 300,
-          useNativeDriver: true,
-          easing: Easing.out(Easing.exp),
-        }),
-        Animated.timing(fadeAnim, {
-          toValue: 0,
-          duration: 250,
-          useNativeDriver: true,
-        }),
-      ]),
-    ]).start(() => {
-      setShowChart(false);
-      // Reset values for next appearance
-      chartAnim.setValue(1);
-      fadeAnim.setValue(1);
-    });
-  };
-
-  const handleChartLongPress = () => {
-    Animated.sequence([
-      Animated.timing(chartAnim, {
-        toValue: 1.1,
-        duration: 150,
-        useNativeDriver: true,
-      }),
-      Animated.timing(chartAnim, {
-        toValue: 1,
-        duration: 150,
-        useNativeDriver: true,
-      }),
-    ]).start(() => navigation.navigate('Info'));
-  };
 
   const formatTimestamp = (ts) => {
     if (!ts) return 'N/A';
-    const parsed = dayjs(ts, 'YYYY-MM-DD HH:mm:ss');
-    return parsed.isValid() ? parsed.format('DD-MMM-YYYY, hh:mm A') : 'Invalid';
+    return dayjs(ts).format('DD-MMM-YYYY, hh:mm A');
   };
 
   const filteredMachines = machines.filter((machine) =>
@@ -269,6 +168,37 @@ const MachineDashboard = ({ navigation }) => {
       }).start();
     }
 
+    const statusValue = item.status;
+    let statusText, statusIcon, bgColor, statusColor, borderColor, gradientColors;
+
+    if (statusValue === 1) {
+      statusText = 'ACTIVE';
+      statusIcon = 'rocket-launch';
+      bgColor = '#EBF8F2';
+      statusColor = COLORS.success;
+      borderColor = '#BEE3D8';
+      gradientColors = [COLORS.success, COLORS.successLight];
+    } else if (statusValue === 0) {
+      statusText = 'INACTIVE';
+      statusIcon = 'power-off';
+      bgColor = '#FFF5F5';
+      statusColor = COLORS.error;
+      borderColor = '#FED7D7';
+      gradientColors = [COLORS.error, COLORS.errorLight];
+    } else {
+      statusText = 'UNKNOWN';
+      statusIcon = 'help-circle';
+      bgColor = '#EDF2F7';
+      statusColor = COLORS.neutral;
+      borderColor = '#E2E8F0';
+      gradientColors = [COLORS.neutral, COLORS.neutralLight];
+    }
+
+    const usage = machineStatusMap[item.gfrid] || {};
+    const onPercent = usage.on_time_percentage || 0;
+    const onTimeMinutes = usage.on_time_sec ? Math.round(usage.on_time_sec / 60) : 0;
+
+
     return (
       <Animated.View
         style={{
@@ -284,14 +214,72 @@ const MachineDashboard = ({ navigation }) => {
         }}
       >
         <TouchableOpacity
-          style={styles.card}
+          style={[styles.card, { borderColor }]}
           onPress={() => navigation.navigate('MachineDetail', { gfrid: item.gfrid })}
           activeOpacity={0.9}
         >
-          <Text style={styles.cardText}>
-            <MaterialCommunityIcons name="engine" size={24} color="black" /> GFRID: {item.gfrid}</Text>
-          <Text style={styles.cardSub}>Status: {item.status || 'N/A'}</Text>
-          <Text style={styles.cardSub}>Last Seen: {formatTimestamp(item.last_seen)}</Text>
+          <View style={styles.cardHeader}>
+            <LinearGradient
+              colors={[bgColor, '#FFFFFF']}
+              style={styles.machineIconContainer}
+              start={{ x: 0, y: 0 }}
+              end={{ x: 1, y: 1 }}
+            >
+              <MaterialCommunityIcons 
+                name="robot-industrial" 
+                size={28} 
+                color={statusColor} 
+              />
+            </LinearGradient>
+            <View style={styles.titleContainer}>
+              <Text style={styles.cardTitle}>Machine GFRID {item.gfrid}</Text>
+              <Text style={styles.cardSubtitle}>Last updated: {formatTimestamp(item.last_seen)}</Text>
+            </View>
+            <View style={[styles.statusPill, { backgroundColor: bgColor }]}>
+              <MaterialCommunityIcons 
+                name={statusIcon} 
+                size={16} 
+                color={statusColor} 
+              />
+              <Text style={[styles.statusText, { color: statusColor }]}>{statusText}</Text>
+            </View>
+          </View>
+
+          <View style={styles.usageContainer}>
+            <Text style={styles.usageTitle}>UTILIZATION METRICS</Text>
+            <View style={styles.usageBarContainer}>
+              <View style={styles.percentageDisplay}>
+                <Text style={[styles.percentageValue, { color: statusColor }]}>
+                  {onPercent.toFixed(0)}%
+                </Text>
+                <Text style={styles.percentageLabel}>Active time</Text>
+              </View>
+              <View style={styles.usageBarWrapper}>
+                <View style={styles.usageBarBackground}>
+                  <LinearGradient
+                    colors={gradientColors}
+                    start={{ x: 0, y: 0 }}
+                    end={{ x: 1, y: 0 }}
+                    style={[
+                      styles.usageBarFill, 
+                      { 
+                        width: `${onPercent}%`,
+                      }
+                    ]}
+                  >
+                    {onPercent > 15 && (
+                      <Text style={styles.usageBarText}>{onTimeMinutes}m</Text>
+                    )}
+                  </LinearGradient>
+                </View>
+                <View style={styles.usageBarLabels}>
+                  <Text style={styles.usageBarLabel}>0%</Text>
+                  <Text style={styles.usageBarLabel}>50%</Text>
+                  <Text style={styles.usageBarLabel}>100%</Text>
+                </View>
+              </View>
+            </View>
+          </View>
         </TouchableOpacity>
       </Animated.View>
     );
@@ -300,13 +288,17 @@ const MachineDashboard = ({ navigation }) => {
   if (loading) {
     return (
       <View style={styles.loadingContainer}>
-        <ActivityIndicator size="large" color="#1E40AF" />
+        <ActivityIndicator size="large" color={COLORS.primaryDark} />
+        <Text style={styles.loadingText}>Loading machine data...</Text>
       </View>
     );
   }
 
   return (
-    <View style={styles.container}>
+    <ScrollView
+      style={styles.container}
+      contentContainerStyle={styles.scrollContainer}
+    >
       {typedText !== '' && (
         <Animated.Text
           style={[
@@ -321,342 +313,218 @@ const MachineDashboard = ({ navigation }) => {
         </Animated.Text>
       )}
 
+      <View style={styles.searchContainer}>
+        <Ionicons name="search" size={20} color={COLORS.textMedium} style={styles.searchIcon} />
+        <TextInput
+          style={styles.input}
+          placeholder="Search by machine ID..."
+          value={searchGfrid}
+          onChangeText={setSearchGfrid}
+          placeholderTextColor={COLORS.textLight}
+        />
+      </View>
+
       <FlatList
-        refreshing={loading}
-        onRefresh={fetchMachines}
-        ListHeaderComponent={
-          <>
-            {showChart && priorityUsage.length > 0 && (
-              <Animated.View
-                style={[
-                  styles.chartCard,
-                  {
-                    transform: [{ scale: chartAnim }],
-                    opacity: fadeAnim,
-                  },
-                ]}
-              >
-                <TouchableOpacity style={styles.closeIcon} onPress={hidePieChart}>
-                  <Ionicons name="close" size={20} color="#4B5563" />
-                </TouchableOpacity>
-
-                <Pressable onLongPress={handleChartLongPress} style={{ flex: 1 }}>
-                  <Text style={styles.chartTitle}>Past 1 Week ON % per GFRID</Text>
-                  <CustomDonutChart
-                    data={priorityUsage.map((item, index) => ({
-                      label: `${item.gfrid}`,
-                      value: parseFloat(item.on_percent.toFixed(2)),
-                      color: [
-                        '#3B82F6', '#F97316', '#10B981', '#EF4444',
-                        '#8B5CF6', '#14B8A6', '#F59E0B', '#EC4899',
-                      ][index % 8],
-                    }))}
-                  />
-                </Pressable>
-              </Animated.View>
-            )}
-
-            <TextInput
-              style={styles.input}
-              placeholder="Search by GFRID"
-              value={searchGfrid}
-              onChangeText={setSearchGfrid}
-              placeholderTextColor="#9CA3AF"
-            />
-          </>
-        }
         data={filteredMachines}
         keyExtractor={(item) => item.gfrid.toString()}
         renderItem={renderItem}
-        contentContainerStyle={{ paddingBottom: 24 }}
+        scrollEnabled={false}
+        contentContainerStyle={styles.listContainer}
       />
-    </View>
+    </ScrollView>
   );
 };
 
 const styles = StyleSheet.create({
   container: {
     flex: 1,
-    padding: 16,
-    backgroundColor: '#F0F4F8',
-    marginBottom: 50,
+    backgroundColor: COLORS.background,
+  },
+  scrollContainer: {
+    paddingHorizontal: 20,
+    paddingTop: 24,
+    paddingBottom: 24,
+  },
+  listContainer: {
+    paddingBottom: 24,
   },
   loadingContainer: {
     flex: 1,
     justifyContent: 'center',
     alignItems: 'center',
-    backgroundColor: '#F1F5F9',
+    backgroundColor: COLORS.background,
+  },
+  loadingText: {
+    marginTop: 16,
+    fontSize: 16,
+    color: COLORS.textMedium,
+    fontWeight: '600',
   },
   welcomeText: {
-    fontSize: 24,
-    fontWeight: 'bold',
-    marginBottom: 20,
-    color: '#1E40AF',
+    fontSize: 26,
+    fontWeight: '700',
+    marginBottom: 24,
+    color: COLORS.primaryDark,
     textAlign: 'center',
-    letterSpacing: 0.8,
+    letterSpacing: 0.5,
+  },
+  searchContainer: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    marginBottom: 24,
+    backgroundColor: COLORS.cardBg,
+    borderRadius: 12,
+    paddingHorizontal: 16,
+    height: 56,
+    borderWidth: 1,
+    borderColor: COLORS.border,
+    shadowColor: '#000',
+    shadowOffset: { width: 0, height: 2 },
+    shadowOpacity: 0.05,
+    shadowRadius: 6,
+    elevation: 2,
+  },
+  searchIcon: {
+    marginRight: 12,
   },
   input: {
-    backgroundColor: '#E2E8F0',
-    borderRadius: 14,
-    paddingHorizontal: 16,
-    paddingVertical: 12,
+    flex: 1,
+    height: '100%',
     fontSize: 16,
-    color: '#1F2937',
-    marginBottom: 20,
-    borderWidth: 1,
-    borderColor: '#CBD5E1',
+    color: COLORS.textDark,
+    fontWeight: '500',
   },
   card: {
-    backgroundColor: '#FFFFFF',
+    backgroundColor: COLORS.cardBg,
     padding: 24,
-    marginBottom: 16,
-    borderRadius: 20,
-    elevation: 10,
-    shadowColor: '#000',
-    shadowOffset: { width: 0, height: 6 },
-    shadowOpacity: 0.1,
-    shadowRadius: 12,
-    borderBottomWidth: 6,
-    borderBottomColor: '#9f5ead',
-  },
-  cardText: {
-    fontSize: 20,
-    fontWeight: 'bold',
-    color: '#1E293B',
-  },
-  cardSub: {
-    fontSize: 15,
-    color: '#475569',
-    marginTop: 4,
-  },
-  chartCard: {
-    backgroundColor: '#ffffff',
-    borderRadius: 24,
-    paddingVertical: 28,
-    paddingHorizontal: 20,
-    marginBottom: 15,
-    shadowColor: 'black',
-    shadowOffset: { width: 0, height: 6 },
-    shadowOpacity: 0.15,
-    shadowRadius: 10,
-    elevation: 12,
-    position: 'relative',
-    borderWidth: 1,
-    borderColor: '#E0E7FF',
-  },
-  chartTitle: {
-    fontSize: 17,
-    fontWeight: '900',
     marginBottom: 20,
-    color: '#1E3A8A',
-    textAlign: 'center',
+    borderRadius: 18,
+    borderWidth: 2,
+    shadowColor: '#000',
+    shadowOffset: { width: 0, height: 4 },
+    shadowOpacity: 0.08,
+    shadowRadius: 16,
+    elevation: 3,
+  },
+  cardHeader: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    marginBottom: 20,
+  },
+  machineIconContainer: {
+    width: 60,
+    height: 60,
+    borderRadius: 16,
+    justifyContent: 'center',
+    alignItems: 'center',
+    marginRight: 16,
+    shadowColor: '#000',
+    shadowOffset: { width: 0, height: 2 },
+    shadowOpacity: 0.1,
+    shadowRadius: 4,
+  },
+  titleContainer: {
+    flex: 1,
+  },
+  cardTitle: {
+    fontSize: 20,
+    fontWeight: '700',
+    color: COLORS.textDark,
+    marginBottom: 6,
+  },
+  cardSubtitle: {
+    fontSize: 14,
+    color: COLORS.textMedium,
+    fontWeight: '500',
+  },
+  statusPill: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    paddingHorizontal: 14,
+    paddingVertical: 8,
+    borderRadius: 24,
+    shadowColor: '#000',
+    shadowOffset: { width: 0, height: 1 },
+    shadowOpacity: 0.1,
+    shadowRadius: 2,
+  },
+  statusText: {
+    fontSize: 14,
+    fontWeight: '700',
+    marginLeft: 6,
     textTransform: 'uppercase',
-    letterSpacing: 1,
+    letterSpacing: 0.5,
   },
-  closeIcon: {
-    position: 'absolute',
-    top: 10,
-    right: 10,
-    zIndex: 10,
-    padding: 6,
-  },
-  scrollButtonLeft: {
-    position: 'absolute',
-    left: 10,
-    top: '50%',
-    zIndex: 20,
-    backgroundColor: 'rgba(255,255,255,0.9)',
-    borderRadius: 50,
-    padding: 5,
-    transform: [{ translateY: -12 }],
-    elevation: 8,
-    shadowColor: '#000',
-    shadowOffset: { width: 0, height: 3 },
-    shadowOpacity: 0.2,
-    shadowRadius: 5,
+  usageContainer: {
+    marginTop: 16,
+    padding: 20,
+    backgroundColor: '#F8FAFC',
+    borderRadius: 16,
     borderWidth: 1,
-    borderColor: '#D1D5DB',
-    marginTop: 40
+    borderColor: COLORS.border,
   },
-  scrollButtonRight: {
-    position: 'absolute',
-    right: 10,
-    top: '50%',
-    zIndex: 20,
-    backgroundColor: 'rgba(255,255,255,0.9)',
-    borderRadius: 50,
-    padding: 5,
-    transform: [{ translateY: -12 }],
-    elevation: 8,
-    shadowColor: '#000',
-    shadowOffset: { width: 0, height: 3 },
-    shadowOpacity: 0.2,
-    shadowRadius: 5,
-    borderWidth: 1,
-    borderColor: '#D1D5DB',
-    marginTop: 40
+  usageTitle: {
+    fontSize: 13,
+    fontWeight: '700',
+    color: COLORS.textMedium,
+    marginBottom: 16,
+    letterSpacing: 0.5,
+    textTransform: 'uppercase',
+  },
+  usageBarContainer: {
+    flexDirection: 'row',
+    alignItems: 'center',
+  },
+  percentageDisplay: {
+    width: 80,
+    alignItems: 'center',
+    marginRight: 20,
+  },
+  percentageValue: {
+    fontSize: 24,
+    fontWeight: '800',
+    marginBottom: 6,
+  },
+  percentageLabel: {
+    fontSize: 13,
+    color: COLORS.textMedium,
+    fontWeight: '600',
+  },
+  usageBarWrapper: {
+    flex: 1,
+  },
+  usageBarBackground: {
+    height: 24,
+    borderRadius: 12,
+    backgroundColor: '#EDF2F7',
+    overflow: 'hidden',
+    marginBottom: 8,
+  },
+  usageBarFill: {
+    height: '100%',
+    borderRadius: 12,
+    justifyContent: 'center',
+    alignItems: 'flex-end',
+    paddingRight: 10,
+  },
+  usageBarText: {
+    color: 'white',
+    fontWeight: 'bold',
+    fontSize: 12,
+    textShadowColor: 'rgba(0,0,0,0.2)',
+    textShadowOffset: { width: 0, height: 1 },
+    textShadowRadius: 2,
+  },
+  usageBarLabels: {
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+    paddingHorizontal: 4,
+  },
+  usageBarLabel: {
+    fontSize: 11,
+    color: COLORS.textLight,
+    fontWeight: '600',
   },
 });
 
 export default MachineDashboard;
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-// import React, { useEffect, useState } from 'react';
-// import { 
-//   View, 
-//   Text, 
-//   FlatList, 
-//   TextInput, 
-//   StyleSheet, 
-//   TouchableOpacity,
-//   ActivityIndicator,
-//   Button 
-// } from 'react-native';
-// import axios from 'axios';
-
-// const BASE_URL = 'http://192.168.1.4:8000'; // Update with your actual server IP
-
-// const MachineDashboard = ({ navigation }) => {
-//   const [machines, setMachines] = useState([]);
-//   const [searchGfrid, setSearchGfrid] = useState('');
-//   const [loading, setLoading] = useState(true);
-//   const [error, setError] = useState(null);
-
-//   const fetchMachines = async () => {
-//     try {
-//       setLoading(true);
-//       setError(null);
-//       const res = await axios.get(`${BASE_URL}/api/machines/`);
-//       setMachines(res.data);
-//     } catch (error) {
-//       console.error('Error fetching machines:', error);
-//       setError('Failed to load machines. Please try again.');
-//     } finally {
-//       setLoading(false);
-//     }
-//   };
-
-//   useEffect(() => {
-//     fetchMachines();
-//   }, []);
-
-//   const filteredMachines = machines.filter(machine =>
-//     machine.gfrid.toString().includes(searchGfrid)
-//   );
-
-//   const renderItem = ({ item }) => (
-//     <TouchableOpacity
-//       style={styles.card}
-//       onPress={() => navigation.navigate('MachineDetail', { gfrid: item.gfrid })}
-//     >
-//       <Text style={styles.cardText}>Machine GFRID: {item.gfrid}</Text>
-//       <Text style={styles.cardSub}>Last Alert: {item.last_alert || 'N/A'}</Text>
-//       <Text style={styles.cardSub}>Last Seen: {item.last_seen || 'N/A'}</Text>
-//     </TouchableOpacity>
-//   );
-
-//   if (loading) {
-//     return (
-//       <View style={styles.loadingContainer}>
-//         <ActivityIndicator size="large" color="#0000ff" />
-//       </View>
-//     );
-//   }
-
-//   if (error) {
-//     return (
-//       <View style={styles.errorContainer}>
-//         <Text style={styles.errorText}>{error}</Text>
-//         <Button title="Retry" onPress={fetchMachines} />
-//       </View>
-//     );
-//   }
-
-//   return (
-//     <View style={styles.container}>
-//       <Text style={styles.title}>All Machines</Text>
-//       <TextInput
-//         style={styles.input}
-//         placeholder="Search by GFRID"
-//         value={searchGfrid}
-//         onChangeText={setSearchGfrid}
-//       />
-//       <FlatList
-//         data={filteredMachines}
-//         keyExtractor={(item) => item.gfrid.toString()}
-//         renderItem={renderItem}
-//         contentContainerStyle={{ paddingBottom: 24 }}
-//       />
-//     </View>
-//   );
-// };
-
-// const styles = StyleSheet.create({
-//   container: {
-//     flex: 1,
-//     padding: 16,
-//     backgroundColor: '#fff',
-//   },
-//   loadingContainer: {
-//     flex: 1,
-//     justifyContent: 'center',
-//     alignItems: 'center',
-//   },
-//   errorContainer: {
-//     flex: 1,
-//     justifyContent: 'center',
-//     alignItems: 'center',
-//     padding: 20,
-//   },
-//   errorText: {
-//     color: 'red',
-//     marginBottom: 20,
-//     textAlign: 'center',
-//   },
-//   title: {
-//     fontSize: 24,
-//     fontWeight: 'bold',
-//     marginBottom: 16,
-//   },
-//   input: {
-//     borderWidth: 1,
-//     borderColor: '#ccc',
-//     borderRadius: 8,
-//     padding: 8,
-//     marginBottom: 16,
-//   },
-//   card: {
-//     backgroundColor: '#f1f1f1',
-//     padding: 16,
-//     marginBottom: 12,
-//     borderRadius: 8,
-//   },
-//   cardText: {
-//     fontSize: 18,
-//     fontWeight: 'bold',
-//   },
-//   cardSub: {
-//     fontSize: 14,
-//     color: '#666',
-//     marginTop: 4,
-//   },
-// });
-
-// export default MachineDashboard;

@@ -1,4 +1,4 @@
-import React, { useEffect, useState } from 'react';
+import React, { useEffect, useState, useRef } from 'react';
 import {
   Text,
   View,
@@ -14,36 +14,48 @@ import dayjs from 'dayjs';
 import Ionicons from 'react-native-vector-icons/Ionicons';
 import MaterialCommunityIcons from '@expo/vector-icons/MaterialCommunityIcons';
 
-const theme = {
-  primary: "#4a6da7",
-  secondary: "#a8c6fa",
-  success: "#4dc429",
-  danger: "#dc3545",
-  warning: "black",
-  info: "#17a2b8",
-  light: "#f8f9fa",
-  dark: "#343a40",
-  background: "#f5f7fa",
-  cardBackground: "#ffffff",
-  textPrimary: "#212529",
-  textSecondary: "#6c757d",
-};
-
 import { BASE_URL } from '../config';
 
 const MAX_POINTS_PER_PAGE = 50;
 const pointWidth = 60;
 
-const MachineStatusGraph = ({ gfrid, fromDate, toDate, range }) => {
+const MachineStatusGraph = ({ gfrid, fromDate, range }) => {
+  const [toDate, setToDate] = useState(new Date());
   const [statusData, setStatusData] = useState([]);
   const [statusDetails, setStatusDetails] = useState({ onTime: 0, offTime: 0 });
   const [usageData, setUsageData] = useState({ labels: [], values: [] });
   const [loading, setLoading] = useState(true);
   const [page, setPage] = useState(0);
+  const [refreshTick, setRefreshTick] = useState(0);
+  const intervalRef = useRef(null);
+  const [lastUpdated, setLastUpdated] = useState('');
+  const [showUpdatedNotification, setShowUpdatedNotification] = useState(false);
 
-  const fetchData = async () => {
+  const formatTimeLabel = (date) => {
+    return dayjs(date).format('h:mm A');
+  };
+
+  const formatDateLabel = (date) => {
+    return dayjs(date).format('D MMM');
+  };
+
+  const formatHourlyLabel = (hour) => {
+    const [h] = hour.split(':');
+    const hourNum = parseInt(h, 10);
+    return dayjs().hour(hourNum).minute(0).format('h A');
+  };
+
+  const updateLastUpdatedTime = () => {
+    const now = dayjs();
+    setLastUpdated(now.format('h:mm A'));
+    setShowUpdatedNotification(true);
+    setTimeout(() => setShowUpdatedNotification(false), 3000);
+  };
+
+  const fetchData = async (showLoader = false) => {
     try {
-      setLoading(true);
+      if (showLoader) setLoading(true);
+
       const params = {
         gfrid,
         from_date: dayjs(fromDate).utc().toISOString(),
@@ -53,22 +65,34 @@ const MachineStatusGraph = ({ gfrid, fromDate, toDate, range }) => {
 
       const res = await axios.get(`${BASE_URL}/api/machine-status/`, { params });
       const { on_time_sec, off_time_sec, status_records } = res.data;
+
+      // Calculate accurate on/off times from the records
+      let calculatedOnTime = 0;
+      let calculatedOffTime = 0;
+
       const pulsePoints = [];
       const hourlyUsage = {};
 
       (status_records || []).forEach(({ start_time, end_time, status }) => {
         const start = dayjs(start_time);
         const end = dayjs(end_time);
+        const duration = end.diff(start, 'second');
         const safeStatus = status === 1 ? 1 : 0;
 
+        if (safeStatus === 1) {
+          calculatedOnTime += duration;
+        } else {
+          calculatedOffTime += duration;
+        }
+
         pulsePoints.push({
-          label1: start.format('HH:mm'),
-          label2: start.format('DD/MM'),
+          label1: formatTimeLabel(start),
+          label2: formatDateLabel(start),
           value: safeStatus,
         });
         pulsePoints.push({
-          label1: end.format('HH:mm'),
-          label2: end.format('DD/MM'),
+          label1: formatTimeLabel(end),
+          label2: formatDateLabel(end),
           value: safeStatus,
         });
 
@@ -85,28 +109,57 @@ const MachineStatusGraph = ({ gfrid, fromDate, toDate, range }) => {
         }
       });
 
+      // Use calculated times instead of API times for more accuracy
       setStatusData(pulsePoints);
-      setStatusDetails({ onTime: on_time_sec, offTime: off_time_sec });
+      setStatusDetails({ 
+        onTime: calculatedOnTime, 
+        offTime: calculatedOffTime 
+      });
+
+      console.log('Interval:', dayjs(fromDate).format('YYYY-MM-DD HH:mm:ss'), 'to', dayjs(toDate).format('YYYY-MM-DD HH:mm:ss'));
+console.log('Calculated ON Time (seconds):', calculatedOnTime);
+console.log('Calculated OFF Time (seconds):', calculatedOffTime);
+console.log('Formatted ON Time:', formatTime(calculatedOnTime));
+console.log('Formatted OFF Time:', formatTime(calculatedOffTime));
+
 
       const fullLabels = Array.from({ length: 24 }, (_, i) => `${i.toString().padStart(2, '0')}:00`);
       const fullValues = fullLabels.map((label) =>
         parseFloat((hourlyUsage[label] || 0).toFixed(2))
       );
 
-      setUsageData({ labels: fullLabels, values: fullValues });
+      setUsageData({ 
+        labels: fullLabels.map(formatHourlyLabel),
+        values: fullValues 
+      });
+      setRefreshTick((tick) => tick + 1);
+      updateLastUpdatedTime();
     } catch (err) {
       console.error('Fetch error', err);
       setStatusData([]);
       setUsageData({ labels: [], values: [] });
       setStatusDetails({ onTime: 0, offTime: 0 });
     } finally {
-      setLoading(false);
+      if (showLoader) setLoading(false);
     }
   };
 
   useEffect(() => {
-    fetchData();
-  }, [gfrid, fromDate, toDate, range]);
+    fetchData(true);
+
+    // Refresh data every 30 seconds
+    intervalRef.current = setInterval(() => {
+      setToDate(new Date());
+    }, 3000);
+
+    return () => {
+      clearInterval(intervalRef.current);
+    };
+  }, []);
+
+  useEffect(() => {
+    fetchData(false);
+  }, [toDate]);
 
   const totalPages = Math.ceil(statusData.length / MAX_POINTS_PER_PAGE);
   const currentData = statusData.slice(page * MAX_POINTS_PER_PAGE, (page + 1) * MAX_POINTS_PER_PAGE);
@@ -117,51 +170,60 @@ const MachineStatusGraph = ({ gfrid, fromDate, toDate, range }) => {
   const formatTime = (totalSeconds) => {
     const h = Math.floor(totalSeconds / 3600);
     const m = Math.floor((totalSeconds % 3600) / 60);
-    const s = totalSeconds % 60;
-    return `${h.toString().padStart(2, '0')}:${m.toString().padStart(2, '0')}:${s.toString().padStart(2, '0')}`;
+    return `${h}h ${m}m`;
   };
+  
 
   if (loading) return <ActivityIndicator size="large" style={{ marginTop: 50 }} color="#4a6da7" />;
 
   return (
     <ScrollView style={styles.container}>
-      {/* Enhanced Runtime Summary Card */}
+      {/* Summary Card */}
       <View style={styles.summaryCard}>
         <View style={styles.summaryHeader}>
           <Ionicons name="time-outline" size={24} color="#fff" />
-          <Text style={styles.summaryHeaderText}>Machine Runtime Summary</Text>
+          <Text style={styles.summaryHeaderText}>MACHINE RUNTIME</Text>
         </View>
+        
         <View style={styles.summaryContent}>
           <View style={styles.summaryRow}>
             <View style={styles.summaryItem}>
-            <MaterialCommunityIcons name="toggle-switch-outline" size={24} color="green" />
-
-              <Text style={styles.summaryLabel}>ON Time:</Text>
-              <Text style={styles.summaryValue}>{formatTime(statusDetails.onTime)}</Text>
+              <MaterialCommunityIcons name="power" size={24} color="#4ade80" />
+              <View style={styles.summaryTextContainer}>
+                <Text style={styles.summaryLabel}>ON TIME</Text>
+                <Text style={styles.summaryValue}>{formatTime(statusDetails.onTime)}</Text>
+              </View>
             </View>
+            
             <View style={styles.summaryItem}>
-             <MaterialCommunityIcons name="toggle-switch-off-outline" size={24} color="red" />
-              <Text style={styles.summaryLabel}>OFF Time:</Text>
-              <Text style={styles.summaryValue}>{formatTime(statusDetails.offTime)}</Text>
+              <MaterialCommunityIcons name="power-off" size={24} color="#f87171" />
+              <View style={styles.summaryTextContainer}>
+                <Text style={styles.summaryLabel}>OFF TIME</Text>
+                <Text style={styles.summaryValue}>{formatTime(statusDetails.offTime)}</Text>
+              </View>
             </View>
           </View>
+
+          {showUpdatedNotification && (
+            <View style={styles.updatedNotification}>
+              <Text style={styles.updatedText}>Updated</Text>
+            </View>
+          )}
         </View>
       </View>
 
-      {/* Machine Status Graph in Card */}
+      {/* Machine Status Graph */}
       <View style={styles.graphCard}>
         <Text style={styles.chartTitle}>Machine Status</Text>
         <ScrollView horizontal showsHorizontalScrollIndicator={false}>
           <View style={{ flexDirection: 'row' }}>
-            {/* Y-Axis Labels */}
             <View style={styles.yAxisLabels}>
               <Text style={styles.yAxisLabelText}>ON</Text>
               <Text style={styles.yAxisLabelText}>OFF</Text>
             </View>
-
-            {/* Chart */}
             <View>
               <LineChart
+                key={refreshTick}
                 data={{
                   labels: [],
                   datasets: [{ data: chartValues.length > 0 ? chartValues : [0] }],
@@ -182,7 +244,6 @@ const MachineStatusGraph = ({ gfrid, fromDate, toDate, range }) => {
                 }}
                 style={{ paddingRight: 0, paddingLeft: 0, marginBottom: 0 }}
               />
-
               <View style={[styles.labelContainer, { width: chartWidth }]}>
                 {currentData.length > 0 ? currentData.map(({ label1, label2 }, idx) => (
                   <View key={idx} style={styles.labelItem}>
@@ -191,7 +252,7 @@ const MachineStatusGraph = ({ gfrid, fromDate, toDate, range }) => {
                   </View>
                 )) : (
                   <View style={styles.labelItem}>
-                    <Text style={styles.labelText}>--:--</Text>
+                    <Text style={styles.labelText}>--:-- --</Text>
                     <Text style={styles.labelSubText}>N/A</Text>
                   </View>
                 )}
@@ -207,9 +268,7 @@ const MachineStatusGraph = ({ gfrid, fromDate, toDate, range }) => {
           >
             <Ionicons name="chevron-back-circle" size={36} color={page === 0 ? '#ccc' : '#1E3A8A'} />
           </TouchableOpacity>
-
           <Text style={styles.pageText}>{`Page ${page + 1} of ${totalPages}`}</Text>
-
           <TouchableOpacity
             disabled={page === totalPages - 1}
             onPress={() => setPage((prev) => Math.min(prev + 1, totalPages - 1))}
@@ -219,11 +278,12 @@ const MachineStatusGraph = ({ gfrid, fromDate, toDate, range }) => {
         </View>
       </View>
 
-      {/* Hourly Usage Graph in Card */}
+      {/* Hourly Usage Graph */}
       <View style={styles.graphCard}>
         <Text style={styles.chartTitle}>Hourly Usage</Text>
         <ScrollView horizontal showsHorizontalScrollIndicator={false}>
           <LineChart
+            key={`hourly-${refreshTick}`}
             data={{
               labels: usageData.labels,
               datasets: [{ data: usageData.values }],
@@ -256,50 +316,49 @@ const styles = StyleSheet.create({
   summaryCard: {
     backgroundColor: '#4a6da7',
     borderRadius: 12,
-    marginBottom: 10,
+    marginBottom: 16,
     elevation: 3,
-    shadowColor: '#000',
-    shadowOffset: { width: 0, height: 2 },
-    shadowOpacity: 0.1,
-    shadowRadius: 4,
-    padding:16
+    overflow: 'hidden',
   },
   summaryHeader: {
     flexDirection: 'row',
     alignItems: 'center',
-    padding: 6,
-    borderTopLeftRadius: 12,
-    borderTopRightRadius: 12,
+    paddingVertical: 12,
+    paddingHorizontal: 16,
     backgroundColor: '#3a5a8f',
   },
   summaryHeaderText: {
     color: '#fff',
-    fontSize: 18,
+    fontSize: 16,
     fontWeight: '600',
     marginLeft: 10,
+    flex: 1,
   },
   summaryContent: {
-    padding: 6,
+    padding: 16,
   },
-  sumaryRow: {
+  summaryRow: {
     flexDirection: 'row',
     justifyContent: 'space-between',
+    alignItems: 'center',
   },
   summaryItem: {
     flexDirection: 'row',
     alignItems: 'center',
-    marginVertical: 4,
+    flex: 1,
+  },
+  summaryTextContainer: {
+    marginLeft: 12,
   },
   summaryLabel: {
     color: '#e2e8f0',
-    fontSize: 16,
+    fontSize: 14,
     fontWeight: '500',
-    marginHorizontal: 10,
-    width: 90,
+    marginBottom: 4,
   },
   summaryValue: {
     color: '#fff',
-    fontSize: 16,
+    fontSize: 18,
     fontWeight: '600',
   },
   graphCard: {
@@ -308,10 +367,6 @@ const styles = StyleSheet.create({
     padding: 3,
     marginBottom: 10,
     elevation: 2,
-    shadowColor: '#000',
-    shadowOffset: { width: 0, height: 1 },
-    shadowOpacity: 0.1,
-    shadowRadius: 3,
   },
   chartTitle: {
     fontSize: 18,
@@ -325,9 +380,7 @@ const styles = StyleSheet.create({
     height: 200,
     justifyContent: 'space-between',
     paddingVertical: 8,
-    marginRight:5,
-    
-    
+    marginRight: 5,
   },
   yAxisLabelText: {
     fontSize: 16,
@@ -338,8 +391,6 @@ const styles = StyleSheet.create({
     flexDirection: 'row',
     justifyContent: 'center',
     alignItems: 'flex-start',
-    // marginTop: 4,
-    // marginBottom: 1,
   },
   labelItem: {
     width: 60,
@@ -368,298 +419,19 @@ const styles = StyleSheet.create({
     fontWeight: '600',
     color: '#1E3A8A',
   },
+  updatedNotification: {
+    position: 'absolute',
+    right: 16,
+    bottom: 16,
+    backgroundColor: 'rgba(0,0,0,0.7)',
+    paddingHorizontal: 8,
+    paddingVertical: 4,
+    borderRadius: 12,
+  },
+  updatedText: {
+    color: '#fff',
+    fontSize: 12,
+  },
 });
 
 export default MachineStatusGraph;
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-// import React, { useEffect, useState } from 'react';
-// import {
-//   Text,
-//   Dimensions,
-//   ActivityIndicator,
-//   ScrollView,
-//   View,
-//   StyleSheet
-// } from 'react-native';
-// import axios from 'axios';
-// import { LineChart } from 'react-native-chart-kit';
-// import dayjs from 'dayjs';
-// import { buildDateParams } from '../utils/dateUtils';
-// import Ionicons from 'react-native-vector-icons/Ionicons';
-
-// const BASE_URL = 'http://192.168.1.5:8000';
-
-// const theme = {
-//   primary: "#4a6da7",
-//   secondary: "#a8c6fa",
-//   success: "#4dc429",
-//   danger: "#dc3545",
-//   warning: "black",
-//   info: "#17a2b8",
-//   light: "#f8f9fa",
-//   dark: "#343a40",
-//   background: "#f5f7fa",
-//   cardBackground: "#ffffff",
-//   textPrimary: "#212529",
-//   textSecondary: "#6c757d",
-// };
-
-// const MachineStatusGraph = ({ gfrid, fromDate, toDate, range }) => {
-//   const [statusPoints, setStatusPoints] = useState({ labels: [], values: [] });
-//   const [usageData, setUsageData] = useState({ labels: [], values: [] });
-//   const [loading, setLoading] = useState(true);
-//   const [statusDetails, setStatusDetails] = useState({ onTime: 0, offTime: 0 });
-
-//   const formatSecondsToHHMMSS = (totalSeconds) => {
-//     const hours = Math.floor(totalSeconds / 3600);
-//     const minutes = Math.floor((totalSeconds % 3600) / 60);
-//     const seconds = totalSeconds % 60;
-//     return [hours, minutes, seconds].map((v) => v.toString().padStart(2, '0')).join(':');
-//   };
-
-//   const sanitizeValues = (arr) =>
-//     Array.isArray(arr)
-//       ? arr.map(v => (typeof v === 'number' && isFinite(v) ? v : 0))
-//       : [];
-
-//   const isSafe = (arr) =>
-//     Array.isArray(arr) &&
-//     arr.length > 0 &&
-//     arr.every(v => typeof v === 'number' && isFinite(v));
-
-//   const fetchData = async () => {
-//     try {
-//       setLoading(true);
-//       const params = buildDateParams(gfrid, fromDate, toDate, range);
-//       const res = await axios.get(`${BASE_URL}/api/machine-status/`, { params });
-//       const { on_time_sec, off_time_sec, status_records } = res.data;
-
-//       setStatusDetails({
-//         onTime: on_time_sec,
-//         offTime: off_time_sec
-//       });
-
-//       const pulseLabels = [];
-//       const pulseValues = [];
-//       const hourlyUsage = {};
-
-//       (status_records || []).forEach(({ start_time, end_time, status }) => {
-//         const start = dayjs(start_time);
-//         const end = dayjs(end_time);
-//         const format = (d) => dayjs(d).format('HH:mm:ss');
-
-//         pulseLabels.push(format(start));
-//         pulseValues.push(+status || 0);
-//         pulseLabels.push(format(end));
-//         pulseValues.push(+status || 0);
-
-//         if (status === 1) {
-//           let current = start;
-//           while (current.isBefore(end)) {
-//             const hourKey = `${current.hour().toString().padStart(2, '0')}:00`;
-//             const nextHour = current.startOf('hour').add(1, 'hour');
-//             const segEnd = end.isBefore(nextHour) ? end : nextHour;
-//             const durationMin = Math.max(segEnd.diff(current, 'second') / 60, 0);
-//             hourlyUsage[hourKey] = (hourlyUsage[hourKey] || 0) + durationMin;
-//             current = segEnd;
-//           }
-//         }
-//       });
-
-//       setStatusPoints({
-//         labels: pulseLabels,
-//         values: sanitizeValues(pulseValues)
-//       });
-
-//       const fullLabels = Array.from({ length: 24 }, (_, i) =>
-//         `${i.toString().padStart(2, '0')}:00`
-//       );
-//       const fullValues = fullLabels.map((label) =>
-//         parseFloat((hourlyUsage[label] || 0).toFixed(2))
-//       );
-
-//       setUsageData({
-//         labels: fullLabels,
-//         values: sanitizeValues(fullValues)
-//       });
-
-//     } catch (err) {
-//       console.error('❌ Fetch error', err);
-//       setStatusPoints({ labels: ['00:00', '01:00'], values: [0, 0] });
-//       setUsageData({ labels: ['00:00'], values: [0] });
-//       setStatusDetails({ onTime: 0, offTime: 0 });
-//     } finally {
-//       setLoading(false);
-//     }
-//   };
-
-//   useEffect(() => {
-//     fetchData();
-//   }, [gfrid, fromDate, toDate, range]);
-
-//   if (loading) return <ActivityIndicator size="large" style={{ marginTop: 50 }} />;
-
-//   const statusWidth = Math.max((statusPoints.labels.length || 1) * 80, Dimensions.get('window').width);
-//   const usageWidth = Math.max((usageData.labels.length || 1) * 50, Dimensions.get('window').width);
-
-//   return (
-//     <ScrollView style={styles.container}>
-//       <View style={styles.summaryContainer}>
-//         <Text style={styles.summaryHeader}>
-//           <Ionicons name="time" size={24} color={theme.primary} /> Machine Runtime Summary
-//         </Text>
-//         <View style={styles.summaryRow}>
-//           <Text style={styles.summaryLabel}>
-//             <Ionicons name="toggle-sharp" size={16} color={theme.success} />
-//              ON Time:
-//           </Text>
-//           <Text style={styles.summaryValue}>
-//             {statusDetails.onTime} sec ({formatSecondsToHHMMSS(statusDetails.onTime)})
-//           </Text>
-//         </View>
-//         <View style={styles.summaryRow}>
-//           <Text style={styles.summaryLabel}>
-//             <Ionicons name="toggle-sharp" size={16} color={theme.danger} /> 
-//             OFF Time:
-//           </Text>
-//           <Text style={styles.summaryValue}>
-//             {statusDetails.offTime} sec ({formatSecondsToHHMMSS(statusDetails.offTime)})
-//           </Text>
-//         </View>
-//       </View>
-
-//       {isSafe(statusPoints.values) && (
-//         <>
-//           <Text style={styles.chartTitle}>
-//             <Ionicons name="pulse-outline" size={18} color={theme.info} /> Machine Status
-//           </Text>
-//           <ScrollView horizontal>
-//             <LineChart
-//               data={{
-//                 labels: statusPoints.labels,
-//                 datasets: [{ data: statusPoints.values }]
-//               }}
-//               width={statusWidth}
-//               height={280}
-//               fromZero
-//               chartConfig={{
-//                 backgroundGradientFrom: 'white',
-//                 backgroundGradientTo: '#b8d9e3',
-//                 decimalPlaces: 0,
-//                 color: () => 'black',
-//                 labelColor: () => '#333'
-//               }}
-//             />
-//           </ScrollView>
-//         </>
-//       )}
-
-//       <Text style={styles.chartTitle}>
-//         <Ionicons name="analytics" size={18} color={theme.warning} /> Hourly Usage
-//       </Text>
-//       {isSafe(usageData.values) && (
-//         <ScrollView horizontal>
-//           <LineChart
-//             data={{
-//               labels: usageData.labels,
-//               datasets: [{ data: usageData.values }]
-//             }}
-//             width={usageWidth}
-//             height={300}
-//             fromZero
-//             bezier
-//             yAxisSuffix="m"
-//             chartConfig={{
-//               backgroundGradientFrom: '#fff',
-//               backgroundGradientTo: '#fff',
-//               decimalPlaces: 1,
-//               color: () => '#247782',
-//               labelColor: () => '#000'
-//             }}
-//             renderDotContent={({ x, y, index, indexData }) => (
-//               <Text
-//                 key={`label-${index}`}
-//                 style={{
-//                   position: 'absolute',
-//                   left: x - 10,
-//                   top: y - 20,
-//                   fontSize: 10,
-//                   color: '#333',
-//                   fontWeight: 'bold'
-//                 }}
-//               >
-//                 {indexData}
-//               </Text>
-//             )}
-//           />
-//         </ScrollView>
-//       )}
-//     </ScrollView>
-//   );
-// };
-
-// const styles = StyleSheet.create({
-//   container: {
-//     padding: 10,
-//     backgroundColor: '#fff'
-//   },
-//   summaryContainer: {
-//     paddingHorizontal: 15,
-//     backgroundColor: '#f0fafa',
-//     marginBottom: 5,
-//     borderRadius: 16,
-//     shadowColor: '#000',
-//     shadowOpacity: 0.15,
-//     shadowOffset: { width: 0, height: 4 },
-//     shadowRadius: 8,
-//     elevation: 5,
-//     marginHorizontal: 12
-//   },
-//   summaryHeader: {
-//     fontSize: 18,
-//     fontWeight: 'bold',
-//     color: '#444',
-//     marginBottom: 10,
-//     textAlign: 'center'
-//   },
-//   summaryRow: {
-//     flexDirection: 'row',
-//     justifyContent: 'space-between',
-//     marginBottom: 8
-//   },
-//   summaryLabel: {
-//     fontSize: 16,
-//     fontWeight: '600',
-//     color: '#555'
-//   },
-//   summaryValue: {
-//     fontSize: 16,
-//     color: '#111',
-//     fontWeight: '500'
-//   },
-//   chartTitle: {
-//     textAlign: 'center',
-//     fontWeight: 'bold',
-//     fontSize: 18,
-//     marginVertical: 10,
-//     color: '#111'
-//   }
-// });
-
-// export default MachineStatusGraph;

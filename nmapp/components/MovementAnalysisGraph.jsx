@@ -1,8 +1,3 @@
-
-
-
-// Full MovementAnalysisGraph Component with PDF Download and Scrollable ID Buttons
-
 import React, { useEffect, useState, useMemo, useRef } from "react";
 import {
   View,
@@ -15,25 +10,21 @@ import {
   Animated,
   Modal,
   Image,
-  Alert,
 } from "react-native";
 import axios from "axios";
 import { LineChart, BarChart } from "react-native-chart-kit";
-
 import dayjs from "dayjs";
 import utc from "dayjs/plugin/utc";
 import Ionicons from "react-native-vector-icons/Ionicons";
 import { buildDateParams } from "../utils/dateUtils";
 import NoDataImage from "../assets/nodata.jpg";
 import ViewShot from "react-native-view-shot";
-import * as MediaLibrary from 'expo-media-library';
-import * as Print from 'expo-print';
 import { BASE_URL } from '../config';
 
+dayjs.extend(utc);
 
-// const BASE_URL = "http://192.168.1.4:8000";
 const screenWidth = Dimensions.get("window").width;
-const MAX_DATA_POINTS = 100;
+const MAX_DATA_POINTS = 100;  // Add this line
 const LABEL_WIDTH = 100;
 
 const theme = {
@@ -44,22 +35,23 @@ const theme = {
   textSecondary: "#666",
 };
 
-dayjs.extend(utc);
-
 const MovementAnalysisGraph = ({ gfrid, fromDate, toDate, range }) => {
   const [movementData, setMovementData] = useState([]);
+  const [prevMovementData, setPrevMovementData] = useState([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState(null);
   const [modalVisible, setModalVisible] = useState(false);
   const [activeGraph, setActiveGraph] = useState(null);
   const [currentTab, setCurrentTab] = useState("status");
   const [currentPage, setCurrentPage] = useState(0);
-
+  
+  // Animation refs
   const scaleAnim = useRef(new Animated.Value(0)).current;
   const opacityAnim = useRef(new Animated.Value(0)).current;
   const translateYAnim = useRef(new Animated.Value(30)).current;
+  const fadeAnim = useRef(new Animated.Value(1)).current;
   const viewShotRef = useRef();
-
+  
   const labelColors = {};
 
   const getRandomColorForLabel = (label) => {
@@ -77,10 +69,13 @@ const MovementAnalysisGraph = ({ gfrid, fromDate, toDate, range }) => {
   };
 
   const formatLabelParts = (dt, dur = null) => {
-    const utcDate = dayjs.utc(dt);
-    const time = utcDate.format("HH:mm");
-    const date = utcDate.format("DD/MM");
-    return { label1: `${time} ${date}`, label2: dur ? `Dur: ${formatDuration(dur)}` : "" };
+    const date = dayjs(dt);
+    const time = date.format("hh:mm A");
+    const day = date.format("D MMM");
+    return {
+      label1: `${time}`,
+      label2: `${day}${dur ? ` • ${formatDuration(dur)}` : ""}`,
+    };
   };
 
   const fetchMovementData = async () => {
@@ -88,7 +83,25 @@ const MovementAnalysisGraph = ({ gfrid, fromDate, toDate, range }) => {
       setLoading(true);
       const params = buildDateParams(gfrid, fromDate, toDate, range);
       const res = await axios.get(`${BASE_URL}/api/movement-duration/`, { params });
-      setMovementData(res.data?.movements || []);
+      
+      // Start transition animation
+      Animated.timing(fadeAnim, {
+        toValue: 0,
+        duration: 300,
+        useNativeDriver: true,
+      }).start(() => {
+        // Update data after fade out
+        setPrevMovementData(movementData);
+        setMovementData(res.data?.movements || []);
+        
+        // Fade in new data
+        fadeAnim.setValue(0);
+        Animated.timing(fadeAnim, {
+          toValue: 1,
+          duration: 300,
+          useNativeDriver: true,
+        }).start();
+      });
     } catch {
       setError("Failed to fetch data");
     } finally {
@@ -96,9 +109,16 @@ const MovementAnalysisGraph = ({ gfrid, fromDate, toDate, range }) => {
     }
   };
 
-  useEffect(() => {
+ useEffect(() => {
+  fetchMovementData();
+
+  const interval = setInterval(() => {
     fetchMovementData();
-  }, [gfrid, fromDate, toDate, range]);
+  }, 10000); // fetch every 10 seconds
+
+  return () => clearInterval(interval); // cleanup on unmount
+}, [gfrid, fromDate, toDate, range]);
+
 
   const grouped = useMemo(() => {
     const groups = {};
@@ -109,6 +129,16 @@ const MovementAnalysisGraph = ({ gfrid, fromDate, toDate, range }) => {
     }
     return groups;
   }, [movementData]);
+
+  const prevGrouped = useMemo(() => {
+    const groups = {};
+    for (const item of prevMovementData) {
+      const label = item?.movement || `alert_${item?.alertNotify_id || "unknown"}`;
+      if (!groups[label]) groups[label] = [];
+      groups[label].push(item);
+    }
+    return groups;
+  }, [prevMovementData]);
 
   const safeDownsample = (data, max) => {
     const step = Math.max(1, Math.floor(data.length / max));
@@ -178,8 +208,6 @@ const MovementAnalysisGraph = ({ gfrid, fromDate, toDate, range }) => {
     ]).start(() => setModalVisible(false));
   };
 
- 
-
   const paginatedData = useMemo(() => {
     const data = grouped[activeGraph] || [];
     const start = currentPage * MAX_DATA_POINTS;
@@ -194,111 +222,165 @@ const MovementAnalysisGraph = ({ gfrid, fromDate, toDate, range }) => {
     return buildHourlyChartData(data);
   }, [activeGraph, currentTab, paginatedData]);
 
-  if (loading) return <ActivityIndicator size="large" style={{ marginTop: 30 }} />;
+  if (loading && movementData.length === 0) {
+    return <ActivityIndicator size="large" style={{ marginTop: 30 }} />;
+  }
+
   if (error) return <Text style={{ color: theme.danger }}>{error}</Text>;
 
   return (
-    <ScrollView style={{ backgroundColor: theme.background }}>
-      {movementData.length === 0 ? (
-        <View style={styles.noDataContainer}>
-          <Image source={NoDataImage} style={styles.noDataImage} resizeMode="contain" />
-          <Text style={styles.noDataText}>No movement data available</Text>
-        </View>
-      ) : (
-        Object.entries(grouped).map(([label]) => (
-          <TouchableOpacity key={label} style={[styles.card, { borderLeftColor: getRandomColorForLabel(label) }]} onPress={() => openGraph(label)}>
-            <View style={styles.wholecard}>
-              <Ionicons name="pulse-outline" size={24} color={getRandomColorForLabel(label)} />
-              <View style={styles.cardContent}>
-                <Text style={styles.cardText}>ID : {label.toUpperCase()}</Text>
-                <Ionicons name="chevron-forward" size={25} color={theme.textSecondary} style={styles.iconstyle} />
+    <Animated.View style={{ opacity: fadeAnim }}>
+      <ScrollView style={{ backgroundColor: theme.background }}>
+        {movementData.length === 0 ? (
+          <View style={styles.noDataContainer}>
+            <Image source={NoDataImage} style={styles.noDataImage} resizeMode="contain" />
+            <Text style={styles.noDataText}>No movement data available</Text>
+          </View>
+        ) : (
+          Object.entries(grouped).map(([label]) => (
+            <TouchableOpacity 
+              key={label} 
+              style={[styles.card, { borderLeftColor: getRandomColorForLabel(label) }]} 
+              onPress={() => openGraph(label)}
+            >
+              <View style={styles.wholecard}>
+                <Ionicons name="pulse-outline" size={24} color={getRandomColorForLabel(label)} />
+                <View style={styles.cardContent}>
+                  <Text style={styles.cardText}>ID : {label.toUpperCase()}</Text>
+                  <Ionicons name="chevron-forward" size={25} color={theme.textSecondary} style={styles.iconstyle} />
+                </View>
               </View>
-            </View>
-            <Text style={styles.cardSubtext}>{grouped[label].length} events recorded</Text>
-          </TouchableOpacity>
-        ))
-      )}
+              <Text style={styles.cardSubtext}>{grouped[label].length} events recorded</Text>
+            </TouchableOpacity>
+          ))
+        )}
 
-      <Modal visible={modalVisible} transparent animationType="none">
-        <View style={styles.modalOverlay}>
-          <Animated.View style={[styles.popupCard, { transform: [{ scale: scaleAnim }, { translateY: translateYAnim }], opacity: opacityAnim }]}>
-            <View style={styles.modalHeader}>
-              <TouchableOpacity onPress={closeGraph} style={styles.closeButton}>
-                <Ionicons name="close-circle-outline" size={32} color={theme.text} />
-              </TouchableOpacity>
-              
-            </View>
+        <Modal visible={modalVisible} transparent animationType="none">
+          <View style={styles.modalOverlay}>
+            <Animated.View style={[styles.popupCard, { 
+              transform: [{ scale: scaleAnim }, { translateY: translateYAnim }], 
+              opacity: opacityAnim 
+            }]}>
+              <View style={styles.modalHeader}>
+                <TouchableOpacity onPress={closeGraph} style={styles.closeButton}>
+                  <Ionicons name="close-circle-outline" size={32} color={theme.text} />
+                </TouchableOpacity>
+              </View>
 
-            <ViewShot ref={viewShotRef} options={{ format: 'jpg', quality: 0.9 }}>
-              <Text style={styles.popupTitle}>{activeGraph?.toUpperCase()}</Text>
-              <Text style={styles.popupSubtitle}>{dayjs(fromDate).format("DD MMM YYYY")} → {dayjs(toDate).format("DD MMM YYYY")}</Text>
+              <ViewShot ref={viewShotRef} options={{ format: 'jpg', quality: 0.9 }}>
+                <Text style={styles.popupTitle}>{activeGraph?.toUpperCase()}</Text>
+                <Text style={styles.popupSubtitle}>
+                  {dayjs(fromDate).format("DD MMM YYYY")} → {dayjs(toDate).format("DD MMM YYYY")}
+                </Text>
 
-              <View style={styles.tabContainer}>
-                {["status", "analysis"].map(tab => (
+                <View style={styles.tabContainer}>
+                  {["status", "analysis"].map(tab => (
+                    <TouchableOpacity
+                      key={tab}
+                      onPress={() => setCurrentTab(tab)}
+                      style={[styles.tabButton, { 
+                        backgroundColor: tab === currentTab ? theme.primary : "#ccc" 
+                      }]}
+                    >
+                      <Ionicons 
+                        name={tab === "status" ? "pulse-outline" : "analytics-outline"} 
+                        size={16} 
+                        color="#fff" 
+                        style={{ marginRight: 6 }} 
+                      />
+                      <Text style={styles.tabText}>{tab.toUpperCase()}</Text>
+                    </TouchableOpacity>
+                  ))}
+                </View>
+
+                {chartInfo && (
+                  <ScrollView horizontal>
+                    <View>
+                      <LineChart
+                        data={{ 
+                          labels: chartInfo.labels, 
+                          datasets: [{ data: chartInfo.values }] 
+                        }}
+                        width={Math.max(screenWidth * 0.8, chartInfo.labels.length * LABEL_WIDTH)}
+                        height={240}
+                        chartConfig={{ 
+                          backgroundGradientFrom: '#fff', 
+                          backgroundGradientTo: '#fff', 
+                          decimalPlaces: currentTab === "analysis" ? 2 : 0, 
+                          color: () => 'black', 
+                          labelColor: () => '#000' 
+                        }}
+                        yAxisSuffix={currentTab === "analysis" ? "h" : ""}
+                        bezier={currentTab === "analysis"}
+                        style={{ margin: 10, borderRadius: 12 }}
+                        fromZero
+                      />
+                      <ScrollView horizontal>
+                        <View style={{ flexDirection: 'row', paddingHorizontal: 10 }}>
+                          {chartInfo.custom.map(({ label1, label2 }, i) => (
+                            <View key={i} style={{ width: LABEL_WIDTH, alignItems: 'center' }}>
+                              <Text style={{ fontSize: 11 }}>{label1}</Text>
+                              <Text style={{ fontSize: 10, color: '#666' }}>{label2}</Text>
+                            </View>
+                          ))}
+                        </View>
+                      </ScrollView>
+                    </View>
+                  </ScrollView>
+                )}
+              </ViewShot>
+
+              <View style={styles.paginationContainer}>
+                <TouchableOpacity 
+                  onPress={() => setCurrentPage(p => Math.max(0, p - 1))} 
+                  disabled={currentPage === 0} 
+                  style={{ 
+                    padding: 10, 
+                    opacity: currentPage === 0 ? 0.5 : 1 
+                  }}
+                >
+                  <Ionicons name="chevron-back" size={24} color={theme.text} />
+                </TouchableOpacity>
+                <Text style={{ paddingHorizontal: 10, fontWeight: '600' }}>
+                  Page {currentPage + 1}
+                </Text>
+                <TouchableOpacity 
+                  onPress={() => setCurrentPage(p => p + 1)} 
+                  disabled={paginatedData.length < MAX_DATA_POINTS} 
+                  style={{ 
+                    padding: 10, 
+                    opacity: paginatedData.length < MAX_DATA_POINTS ? 0.5 : 1 
+                  }}
+                >
+                  <Ionicons name="chevron-forward" size={24} color={theme.text} />
+                </TouchableOpacity>
+              </View>
+
+              <ScrollView 
+                horizontal 
+                showsHorizontalScrollIndicator={false} 
+                style={styles.movementScrollBar}
+              >
+                {Object.keys(grouped).map((label) => (
                   <TouchableOpacity
-                    key={tab}
-                    onPress={() => setCurrentTab(tab)}
-                    style={[styles.tabButton, { backgroundColor: tab === currentTab ? theme.primary : "#ccc" }]}
+                    key={label}
+                    onPress={() => { 
+                      setActiveGraph(label); 
+                      setCurrentPage(0); 
+                    }}
+                    style={[styles.movementSwitchButton, { 
+                      backgroundColor: activeGraph === label ? theme.primary : "#ccc" 
+                    }]}
                   >
-                    <Ionicons name={tab === "status" ? "pulse-outline" : "analytics-outline"} size={16} color="#fff" style={{ marginRight: 6 }} />
-                    <Text style={styles.tabText}>{tab.toUpperCase()}</Text>
+                    <Text style={styles.tabText}>{label.toUpperCase()}</Text>
                   </TouchableOpacity>
                 ))}
-              </View>
-
-              {chartInfo && (
-                <ScrollView horizontal>
-                  <View>
-                    <LineChart
-                      data={{ labels: chartInfo.labels, datasets: [{ data: chartInfo.values }] }}
-                      width={Math.max(screenWidth * 0.8, chartInfo.labels.length * LABEL_WIDTH)}
-                      height={240}
-                      chartConfig={{ backgroundGradientFrom: '#fff', backgroundGradientTo: '#fff', decimalPlaces: currentTab === "analysis" ? 2 : 0, color: () => 'black', labelColor: () => '#000' }}
-                      yAxisSuffix={currentTab === "analysis" ? "h" : ""}
-                      bezier={currentTab === "analysis"}
-                      style={{ margin: 10, borderRadius: 12 }}
-                      fromZero
-                    />
-                    <ScrollView horizontal>
-                      <View style={{ flexDirection: 'row', paddingHorizontal: 10 }}>
-                        {chartInfo.custom.map(({ label1, label2 }, i) => (
-                          <View key={i} style={{ width: LABEL_WIDTH, alignItems: 'center' }}>
-                            <Text style={{ fontSize: 11 }}>{label1}</Text>
-                            <Text style={{ fontSize: 10, color: '#666' }}>{label2}</Text>
-                          </View>
-                        ))}
-                      </View>
-                    </ScrollView>
-                  </View>
-                </ScrollView>
-              )}
-            </ViewShot>
-
-            <View style={styles.paginationContainer}>
-              <TouchableOpacity onPress={() => setCurrentPage(p => Math.max(0, p - 1))} disabled={currentPage === 0} style={{ padding: 10, opacity: currentPage === 0 ? 0.5 : 1 }}>
-                <Ionicons name="chevron-back" size={24} color={theme.text} />
-              </TouchableOpacity>
-              <Text style={{ paddingHorizontal: 10, fontWeight: '600' }}>Page {currentPage + 1}</Text>
-              <TouchableOpacity onPress={() => setCurrentPage(p => p + 1)} disabled={paginatedData.length < MAX_DATA_POINTS} style={{ padding: 10, opacity: paginatedData.length < MAX_DATA_POINTS ? 0.5 : 1 }}>
-                <Ionicons name="chevron-forward" size={24} color={theme.text} />
-              </TouchableOpacity>
-            </View>
-
-            <ScrollView horizontal showsHorizontalScrollIndicator={false} style={styles.movementScrollBar}>
-              {Object.keys(grouped).map((label) => (
-                <TouchableOpacity
-                  key={label}
-                  onPress={() => { setActiveGraph(label); setCurrentPage(0); }}
-                  style={[styles.movementSwitchButton, { backgroundColor: activeGraph === label ? theme.primary : "#ccc" }]}
-                >
-                  <Text style={styles.tabText}>{label.toUpperCase()}</Text>
-                </TouchableOpacity>
-              ))}
-            </ScrollView>
-          </Animated.View>
-        </View>
-      </Modal>
-    </ScrollView>
+              </ScrollView>
+            </Animated.View>
+          </View>
+        </Modal>
+      </ScrollView>
+    </Animated.View>
   );
 };
 

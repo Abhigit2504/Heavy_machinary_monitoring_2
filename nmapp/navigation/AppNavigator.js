@@ -46,6 +46,7 @@ import HistoryScreen from "../screens/HistoryScreen";
 import LogsScreen from "../screens/LogsScreen";
 
 import { logoutUser } from '../api/LogsApi';
+import InfoWrapper from "../screens/InfoWrapper";
 
 const Stack = createNativeStackNavigator();
 
@@ -202,7 +203,11 @@ const AppNavigator = () => {
               />
             )}
           </Stack.Screen>
-
+<Stack.Screen
+            name="InfoWrapper"
+            component={InfoWrapper}
+            
+          />
           <Stack.Screen
             name="MachineDetail"
             component={MachineDetail}

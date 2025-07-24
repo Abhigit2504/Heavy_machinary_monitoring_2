@@ -276,103 +276,440 @@ def delete_history_record(request, id):
 # views.py
 import io
 import pytz
-from django.http import FileResponse
+import json
+import logging
+from datetime import datetime
+from django.http import HttpResponse
+from django.db.models import Q
 from reportlab.lib.pagesizes import A4
 from reportlab.lib import colors
-from reportlab.pdfgen import canvas
-from .models import UserSessionLog, PageVisitLog
-from django.shortcuts import get_object_or_404
-from datetime import datetime
+from reportlab.platypus import SimpleDocTemplate, Table, TableStyle, Paragraph, Spacer
+from reportlab.lib.styles import getSampleStyleSheet
 from rest_framework.decorators import api_view, permission_classes
 from rest_framework.permissions import IsAuthenticated
+from rest_framework.response import Response
+from rest_framework import status
+from .models import UserSessionLog, PageVisitLog
+
+logger = logging.getLogger(__name__)
 
 @api_view(['GET'])
 @permission_classes([IsAuthenticated])
 def download_user_logs_pdf(request):
     user = request.user
-    session_id = request.GET.get('session_id', None)
     kolkata_tz = pytz.timezone("Asia/Kolkata")
+    
+    try:
+        session_id = request.GET.get('session_id')
+        start_datetime_str = request.GET.get('start_datetime')
+        end_datetime_str = request.GET.get('end_datetime')
 
-    # Prepare PDF buffer
-    buffer = io.BytesIO()
-    p = canvas.Canvas(buffer, pagesize=A4)
-    width, height = A4
+        logger.info(
+            f"PDF download requested by user {user.id}. "
+            f"Params: session_id={session_id}, "
+            f"start={start_datetime_str}, end={end_datetime_str}"
+        )
 
-    # ===== HEADER SECTION =====
-    p.setFillColor(colors.HexColor('#4A6FA5'))
-    p.rect(0, height - 80, width, 80, fill=True, stroke=False)
-    p.setFont("Helvetica-Bold", 20)
-    p.setFillColor(colors.white)
-    p.drawString(40, height - 50, "USER ACTIVITY REPORT")
-    p.setFont("Helvetica", 10)
-    p.drawString(width - 150, height - 40, f"Generated: {datetime.now().strftime('%d-%m-%Y %H:%M')}")
+        def parse_datetime(dt_str):
+            if not dt_str:
+                return None
+            try:
+                dt = datetime.strptime(dt_str, '%Y-%m-%dT%H:%M')
+                return kolkata_tz.localize(dt)
+            except ValueError:
+                logger.warning(f"Invalid datetime format: {dt_str}")
+                raise ValueError("Invalid datetime format. Expected YYYY-MM-DDTHH:MM")
 
-    y = height - 100
+        start_datetime = parse_datetime(start_datetime_str)
+        end_datetime = parse_datetime(end_datetime_str)
 
-    # Fetch logs
-    if session_id:
-        sessions = [get_object_or_404(UserSessionLog, id=session_id, user=user)]
-    else:
-        sessions = UserSessionLog.objects.filter(user=user).order_by('-login_time')[:50]
+        if start_datetime and end_datetime and start_datetime > end_datetime:
+            return Response(
+                {"error": "Start datetime must be before end datetime"},
+                status=status.HTTP_400_BAD_REQUEST,
+                content_type='application/json'
+            )
 
-    for session in sessions:
-        login = session.login_time.astimezone(kolkata_tz).strftime('%d-%m-%Y %H:%M:%S')
-        logout = session.logout_time.astimezone(kolkata_tz).strftime('%d-%m-%Y %H:%M:%S') if session.logout_time else 'Active'
-        duration = str(session.logout_time - session.login_time).split('.')[0] if session.logout_time else 'Active'
-        device = session.device_info or 'Unknown Device'
-        ip = session.ip_address or 'N/A'
+        buffer = io.BytesIO()
+        doc = SimpleDocTemplate(buffer, pagesize=A4)
+        elements = []
+        styles = getSampleStyleSheet()
 
-        # Session Info
-        p.setFont("Helvetica-Bold", 12)
-        p.setFillColor(colors.black)
-        p.drawString(40, y, f"Session ID: {session.id}")
-        y -= 16
-        p.setFont("Helvetica", 10)
-        p.drawString(60, y, f"Login Time: {login}")
-        y -= 14
-        p.drawString(60, y, f"Logout Time: {logout}")
-        y -= 14
-        p.drawString(60, y, f"Duration: {duration}")
-        y -= 14
-        p.drawString(60, y, f"IP Address: {ip}")
-        y -= 14
-        p.drawString(60, y, f"Device: {device}")
-        y -= 20
+        elements.append(Paragraph("USER ACTIVITY REPORT", styles['Heading1']))
+        elements.append(Spacer(1, 12))
 
-        # Page visits
-        visits = PageVisitLog.objects.filter(session=session).order_by('visited_at')
-        if visits.exists():
-            p.setFont("Helvetica-Bold", 11)
-            p.drawString(60, y, f"Pages Visited: {len(visits)}")
-            y -= 16
-            p.setFont("Helvetica", 9)
-            for visit in visits:
-                timestamp = visit.visited_at.astimezone(kolkata_tz).strftime('%H:%M:%S')
-                page = visit.page_name
-                p.drawString(80, y, f"[{timestamp}] {page}")
-                y -= 12
-                if visit.filters_applied:
-                    p.drawString(100, y, f"Filters: {str(visit.filters_applied)}")
-                    y -= 12
+        filter_info = []
+        if session_id:
+            filter_info.append(f"Session ID: {session_id}")
+        if start_datetime:
+            filter_info.append(f"From: {start_datetime.strftime('%I:%M %p IST %d %b %Y')}")
+        if end_datetime:
+            filter_info.append(f"To: {end_datetime.strftime('%I:%M %p IST %d %b %Y')}")
 
-                if y < 100:
-                    p.showPage()
-                    y = height - 100
+        if filter_info:
+            elements.append(Paragraph(f"<b>Filters:</b> {', '.join(filter_info)}", styles['Normal']))
+
+        elements.append(Paragraph(
+            f"<b>Generated:</b> {datetime.now().astimezone(kolkata_tz).strftime('%I:%M %p IST %d %b %Y')}",
+            styles['Normal']
+        ))
+        elements.append(Spacer(1, 15))
+
+        sessions = UserSessionLog.objects.filter(user=user)
+        if session_id:
+            sessions = sessions.filter(id=session_id)
+        if start_datetime:
+            sessions = sessions.filter(login_time__gte=start_datetime)
+        if end_datetime:
+            sessions = sessions.filter(
+                Q(logout_time__lte=end_datetime) |
+                Q(logout_time__isnull=True, login_time__lte=end_datetime)
+            )
+
+        sessions = sessions.order_by('-login_time')[:100]
+        logger.info(f"Found {sessions.count()} sessions matching criteria")
+
+        if not sessions.exists():
+            elements.append(Paragraph("No sessions found matching the criteria.", styles['Italic']))
         else:
-            p.setFont("Helvetica-Italic", 9)
-            p.drawString(60, y, "No page visits recorded.")
-            y -= 20
+            for session in sessions:
+                login_time = session.login_time.astimezone(kolkata_tz)
+                login_str = login_time.strftime('%I:%M %p IST %d %b %Y')
 
-        y -= 20
-        if y < 100:
-            p.showPage()
-            y = height - 100
+                if session.logout_time:
+                    logout_time = session.logout_time.astimezone(kolkata_tz)
+                    logout_str = logout_time.strftime('%I:%M %p IST %d %b %Y')
+                    duration = str(session.logout_time - session.login_time).split('.')[0]
+                else:
+                    logout_str = 'Active'
+                    duration = 'Active'
 
-    p.save()
-    buffer.seek(0)
+                session_data = [
+                    ["Session ID:", str(session.id)],
+                    ["Login Time:", login_str],
+                    ["Logout Time:", logout_str],
+                    ["Duration:", duration],
+                    ["IP Address:", session.ip_address or 'N/A'],
+                    ["Device:", session.device_info or 'Unknown Device']
+                ]
 
-    filename = f"user_logs_{user.username}_{datetime.now().strftime('%Y%m%d_%H%M')}.pdf"
-    return FileResponse(buffer, as_attachment=True, filename=filename)
+                session_table = Table(session_data, colWidths=[120, 400])
+                session_table.setStyle(TableStyle([
+                    ('FONTNAME', (0, 0), (-1, -1), 'Helvetica'),
+                    ('FONTSIZE', (0, 0), (-1, -1), 10),
+                    ('VALIGN', (0, 0), (-1, -1), 'TOP'),
+                ]))
+                elements.append(session_table)
+                elements.append(Spacer(1, 15))
+
+                visits = PageVisitLog.objects.filter(session=session)
+                if start_datetime:
+                    visits = visits.filter(visited_at__gte=start_datetime)
+                if end_datetime:
+                    visits = visits.filter(visited_at__lte=end_datetime)
+
+                visits = visits.order_by('visited_at')
+                logger.debug(f"Found {visits.count()} visits for session {session.id}")
+
+                if visits.exists():
+                    table_data = [
+                        ["Page Name", "Visit Time", "Filters Applied"]
+                    ]
+
+                    for visit in visits:
+                        visit_time = visit.visited_at.astimezone(kolkata_tz)
+                        filters = visit.filters_applied
+
+                        if isinstance(filters, dict):
+                            filters_str = ", ".join(f"{k}: {v}" for k, v in filters.items())
+                        elif isinstance(filters, str):
+                            try:
+                                filters_dict = json.loads(filters)
+                                filters_str = ", ".join(f"{k}: {v}" for k, v in filters_dict.items())
+                            except:
+                                filters_str = filters
+                        else:
+                            filters_str = str(filters)
+
+                        table_data.append([
+                            Paragraph(visit.page_name or 'N/A', styles['Normal']),
+                            Paragraph(visit_time.strftime('%I:%M %p IST %d %b %Y'), styles['Normal']),
+                            Paragraph(filters_str[:300] + "..." if len(filters_str) > 300 else filters_str, styles['Normal']),
+                        ])
+
+                    visits_table = Table(table_data, colWidths=[130, 110, 270], repeatRows=1)
+                    visits_table.setStyle(TableStyle([
+                        ('BACKGROUND', (0, 0), (-1, 0), colors.HexColor('#4A6FA5')),
+                        ('TEXTCOLOR', (0, 0), (-1, 0), colors.white),
+                        ('FONTNAME', (0, 0), (-1, 0), 'Helvetica-Bold'),
+                        ('FONTSIZE', (0, 0), (-1, -1), 8.5),
+                        ('BACKGROUND', (0, 1), (-1, -1), colors.white),
+                        ('GRID', (0, 0), (-1, -1), 1, colors.lightgrey),
+                        ('VALIGN', (0, 0), (-1, -1), 'TOP'),
+                        ('WORDWRAP', (0, 0), (-1, -1), 'CJK'),
+                    ]))
+                    elements.append(visits_table)
+                else:
+                    elements.append(Paragraph("No visits recorded in this timeframe", styles['Italic']))
+
+                elements.append(Spacer(1, 30))
+
+        doc.build(elements)
+        pdf_content = buffer.getvalue()
+        buffer.seek(0)
+
+        if not pdf_content:
+            logger.error("Generated PDF is empty")
+            raise ValueError("PDF generation failed - empty content")
+
+        logger.info(f"Successfully generated PDF ({len(pdf_content)} bytes)")
+
+        response = HttpResponse(
+            pdf_content,
+            content_type='application/pdf',
+            status=status.HTTP_200_OK
+        )
+        response['Content-Disposition'] = (
+            f'attachment; filename="user_activity_'
+            f'{datetime.now().strftime("%Y%m%d_%H%M")}.pdf"'
+        )
+        response['Content-Length'] = len(pdf_content)
+        return response
+
+    except ValueError as e:
+        logger.warning(f"Validation error: {str(e)}")
+        return Response(
+            {"error": str(e)},
+            status=status.HTTP_400_BAD_REQUEST,
+            content_type='application/json'
+        )
+    except Exception as e:
+        logger.error(f"PDF generation failed: {str(e)}", exc_info=True)
+        return Response(
+            {"error": "Failed to generate PDF. Please try again later."},
+            status=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            content_type='application/json'
+        )
+
+    # views.py
+import io
+import pytz
+import json
+import logging
+from datetime import datetime
+from django.http import HttpResponse
+from django.db.models import Q
+from reportlab.lib.pagesizes import A4
+from reportlab.lib import colors
+from reportlab.platypus import SimpleDocTemplate, Table, TableStyle, Paragraph, Spacer
+from reportlab.lib.styles import getSampleStyleSheet
+from rest_framework.decorators import api_view, permission_classes
+from rest_framework.permissions import IsAuthenticated
+from rest_framework.response import Response
+from rest_framework import status
+from .models import UserSessionLog, PageVisitLog
+
+logger = logging.getLogger(__name__)
+
+@api_view(['GET'])
+@permission_classes([IsAuthenticated])
+def download_user_logs_pdf(request):
+    user = request.user
+    kolkata_tz = pytz.timezone("Asia/Kolkata")
+    
+    try:
+        session_id = request.GET.get('session_id')
+        start_datetime_str = request.GET.get('start_datetime')
+        end_datetime_str = request.GET.get('end_datetime')
+
+        logger.info(
+            f"PDF download requested by user {user.id}. "
+            f"Params: session_id={session_id}, "
+            f"start={start_datetime_str}, end={end_datetime_str}"
+        )
+
+        def parse_datetime(dt_str):
+            if not dt_str:
+                return None
+            try:
+                dt = datetime.strptime(dt_str, '%Y-%m-%dT%H:%M')
+                return kolkata_tz.localize(dt)
+            except ValueError:
+                logger.warning(f"Invalid datetime format: {dt_str}")
+                raise ValueError("Invalid datetime format. Expected YYYY-MM-DDTHH:MM")
+
+        start_datetime = parse_datetime(start_datetime_str)
+        end_datetime = parse_datetime(end_datetime_str)
+
+        if start_datetime and end_datetime and start_datetime > end_datetime:
+            return Response(
+                {"error": "Start datetime must be before end datetime"},
+                status=status.HTTP_400_BAD_REQUEST,
+                content_type='application/json'
+            )
+
+        buffer = io.BytesIO()
+        doc = SimpleDocTemplate(buffer, pagesize=A4)
+        elements = []
+        styles = getSampleStyleSheet()
+
+        elements.append(Paragraph("USER ACTIVITY REPORT", styles['Heading1']))
+        elements.append(Spacer(1, 12))
+
+        filter_info = []
+        if session_id:
+            filter_info.append(f"Session ID: {session_id}")
+        if start_datetime:
+            filter_info.append(f"From: {start_datetime.strftime('%I:%M %p IST %d %b %Y')}")
+        if end_datetime:
+            filter_info.append(f"To: {end_datetime.strftime('%I:%M %p IST %d %b %Y')}")
+
+        if filter_info:
+            elements.append(Paragraph(f"<b>Filters:</b> {', '.join(filter_info)}", styles['Normal']))
+
+        elements.append(Paragraph(
+            f"<b>Generated:</b> {datetime.now().astimezone(kolkata_tz).strftime('%I:%M %p IST %d %b %Y')}",
+            styles['Normal']
+        ))
+        elements.append(Spacer(1, 15))
+
+        sessions = UserSessionLog.objects.filter(user=user)
+        if session_id:
+            sessions = sessions.filter(id=session_id)
+        if start_datetime:
+            sessions = sessions.filter(login_time__gte=start_datetime)
+        if end_datetime:
+            sessions = sessions.filter(
+                Q(logout_time__lte=end_datetime) |
+                Q(logout_time__isnull=True, login_time__lte=end_datetime)
+            )
+
+        sessions = sessions.order_by('-login_time')[:100]
+        logger.info(f"Found {sessions.count()} sessions matching criteria")
+
+        if not sessions.exists():
+            elements.append(Paragraph("No sessions found matching the criteria.", styles['Italic']))
+        else:
+            for session in sessions:
+                login_time = session.login_time.astimezone(kolkata_tz)
+                login_str = login_time.strftime('%I:%M %p IST %d %b %Y')
+
+                if session.logout_time:
+                    logout_time = session.logout_time.astimezone(kolkata_tz)
+                    logout_str = logout_time.strftime('%I:%M %p IST %d %b %Y')
+                    duration = str(session.logout_time - session.login_time).split('.')[0]
+                else:
+                    logout_str = 'Active'
+                    duration = 'Active'
+
+                session_data = [
+                    ["Session ID:", str(session.id)],
+                    ["Login Time:", login_str],
+                    ["Logout Time:", logout_str],
+                    ["Duration:", duration],
+                    ["IP Address:", session.ip_address or 'N/A'],
+                    ["Device:", session.device_info or 'Unknown Device']
+                ]
+
+                session_table = Table(session_data, colWidths=[120, 400])
+                session_table.setStyle(TableStyle([
+                    ('FONTNAME', (0, 0), (-1, -1), 'Helvetica'),
+                    ('FONTSIZE', (0, 0), (-1, -1), 10),
+                    ('VALIGN', (0, 0), (-1, -1), 'TOP'),
+                ]))
+                elements.append(session_table)
+                elements.append(Spacer(1, 15))
+
+                visits = PageVisitLog.objects.filter(session=session)
+                if start_datetime:
+                    visits = visits.filter(visited_at__gte=start_datetime)
+                if end_datetime:
+                    visits = visits.filter(visited_at__lte=end_datetime)
+
+                visits = visits.order_by('visited_at')
+                logger.debug(f"Found {visits.count()} visits for session {session.id}")
+
+                if visits.exists():
+                    table_data = [
+                        ["Page Name", "Visit Time", "Filters Applied"]
+                    ]
+
+                    for visit in visits:
+                        visit_time = visit.visited_at.astimezone(kolkata_tz)
+                        filters = visit.filters_applied
+
+                        if isinstance(filters, dict):
+                            filters_str = ", ".join(f"{k}: {v}" for k, v in filters.items())
+                        elif isinstance(filters, str):
+                            try:
+                                filters_dict = json.loads(filters)
+                                filters_str = ", ".join(f"{k}: {v}" for k, v in filters_dict.items())
+                            except:
+                                filters_str = filters
+                        else:
+                            filters_str = str(filters)
+
+                        table_data.append([
+                            Paragraph(visit.page_name or 'N/A', styles['Normal']),
+                            Paragraph(visit_time.strftime('%I:%M %p IST %d %b %Y'), styles['Normal']),
+                            Paragraph(filters_str[:300] + "..." if len(filters_str) > 300 else filters_str, styles['Normal']),
+                        ])
+
+                    visits_table = Table(table_data, colWidths=[130, 110, 270], repeatRows=1)
+                    visits_table.setStyle(TableStyle([
+                        ('BACKGROUND', (0, 0), (-1, 0), colors.HexColor('#4A6FA5')),
+                        ('TEXTCOLOR', (0, 0), (-1, 0), colors.white),
+                        ('FONTNAME', (0, 0), (-1, 0), 'Helvetica-Bold'),
+                        ('FONTSIZE', (0, 0), (-1, -1), 8.5),
+                        ('BACKGROUND', (0, 1), (-1, -1), colors.white),
+                        ('GRID', (0, 0), (-1, -1), 1, colors.lightgrey),
+                        ('VALIGN', (0, 0), (-1, -1), 'TOP'),
+                        ('WORDWRAP', (0, 0), (-1, -1), 'CJK'),
+                    ]))
+                    elements.append(visits_table)
+                else:
+                    elements.append(Paragraph("No visits recorded in this timeframe", styles['Italic']))
+
+                elements.append(Spacer(1, 30))
+
+        doc.build(elements)
+        pdf_content = buffer.getvalue()
+        buffer.seek(0)
+
+        if not pdf_content:
+            logger.error("Generated PDF is empty")
+            raise ValueError("PDF generation failed - empty content")
+
+        logger.info(f"Successfully generated PDF ({len(pdf_content)} bytes)")
+
+        response = HttpResponse(
+            pdf_content,
+            content_type='application/pdf',
+            status=status.HTTP_200_OK
+        )
+        response['Content-Disposition'] = (
+            f'attachment; filename="user_activity_'
+            f'{datetime.now().strftime("%Y%m%d_%H%M")}.pdf"'
+        )
+        response['Content-Length'] = len(pdf_content)
+        return response
+
+    except ValueError as e:
+        logger.warning(f"Validation error: {str(e)}")
+        return Response(
+            {"error": str(e)},
+            status=status.HTTP_400_BAD_REQUEST,
+            content_type='application/json'
+        )
+    except Exception as e:
+        logger.error(f"PDF generation failed: {str(e)}", exc_info=True)
+        return Response(
+            {"error": "Failed to generate PDF. Please try again later."},
+            status=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            content_type='application/json'
+        )
+
+
 
 
 

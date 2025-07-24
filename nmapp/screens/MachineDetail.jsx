@@ -1,9 +1,4 @@
-
-
-
-
-// MachineDetail.js
-import React, { useState, useEffect } from "react";
+import React, { useState, useEffect, useRef } from "react";
 import {
   View,
   Text,
@@ -26,6 +21,8 @@ import { logPageVisit } from '../api/LogsApi';
 import { BASE_URL } from "../config";
 
 const Tab = createMaterialTopTabNavigator();
+dayjs.extend(utc);
+dayjs.extend(timezone);
 
 const theme = {
   primary: "#4a6da7",
@@ -41,9 +38,6 @@ const theme = {
   info: "#4299e1",
 };
 
-dayjs.extend(utc);
-dayjs.extend(timezone);
-
 const MachineDetail = ({ route }) => {
   const navigation = useNavigation();
   const gfrid = route?.params?.gfrid;
@@ -58,8 +52,12 @@ const MachineDetail = ({ route }) => {
   const [showFromPicker, setShowFromPicker] = useState(false);
   const [showToPicker, setShowToPicker] = useState(false);
 
+  const prevGfridRef = useRef(null);
+  const prevRangeRef = useRef(null);
+
   const handleRefresh = () => setRefreshKey((k) => k + 1);
 
+  // Handle range button logic
   useEffect(() => {
     if (range === "1h" || range === "1d") {
       const now = new Date();
@@ -81,23 +79,38 @@ const MachineDetail = ({ route }) => {
     setShowToPicker(false);
     setRange(null);
   };
-useEffect(() => {
-  if (fromDate && toDate && gfrid) {
-    logPageVisit("MachineDetail", {
-      gfrid,
-      fromDate: fromDate.toISOString(),
-      toDate: toDate.toISOString(),
-      range: range || "custom"
-    }).catch((err) => {
-      console.error("Visit log failed:", err.message);
-    });
-  }
-}, [gfrid, fromDate, toDate, range]);
 
+  // Log visit only when gfrid or range changes
+  useEffect(() => {
+    const prevGfrid = prevGfridRef.current;
+    const prevRange = prevRangeRef.current;
 
-  const formatDate = (date) => date ? dayjs(date).format("DD MMM YYYY, hh:mm A") : "Not set";
+    const shouldLog =
+      (gfrid !== prevGfrid || range !== prevRange) &&
+      gfrid &&
+      fromDate &&
+      toDate;
+
+    if (shouldLog) {
+      logPageVisit("MachineDetail", {
+        gfrid,
+        from: dayjs(fromDate).format("D MMM YYYY, hh:mm A"),
+        to: dayjs(toDate).format("D MMM YYYY, hh:mm A"),
+        range: range || "custom",
+      }).catch((err) => {
+        console.error("Visit log failed:", err.message);
+      });
+
+      prevGfridRef.current = gfrid;
+      prevRangeRef.current = range;
+    }
+  }, [gfrid, range, fromDate, toDate]);
+
+  const formatDate = (date) =>
+    date ? dayjs(date).format("DD MMM YYYY, hh:mm A") : "Not set";
 
   const rangeOptions = ["1h", "1d", "Custom"];
+
 
 
   return (
@@ -302,6 +315,7 @@ const GfridScroller = ({ currentGfrid, fromDate, toDate, range }) => {
     </View>
   );
 };
+
 const styles = StyleSheet.create({
   container: { flex: 1, backgroundColor: "#F8FAFC" },
   title: {
@@ -446,6 +460,7 @@ const styles = StyleSheet.create({
 });
 
 export default MachineDetail;
+
 
 
 
