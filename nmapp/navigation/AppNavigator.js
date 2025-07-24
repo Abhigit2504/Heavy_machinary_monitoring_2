@@ -1,29 +1,3 @@
-// import React from "react";
-// import { createNativeStackNavigator } from "@react-navigation/native-stack";
-// import TabNavigator from './TabNavigator';
-// import MachineDetail from "../screens/MachineDetail";
-// import DownloadScreen from "../screens/DownloadScreen"
-
-// const Stack = createNativeStackNavigator();
-
-// const AppNavigator = () => {
-//   return (
-//     <Stack.Navigator initialRouteName="Tabs">
-//       <Stack.Screen
-//         name="Tabs"
-//         component={TabNavigator}
-//         options={{ headerShown: false }}
-//       />
-//       <Stack.Screen name="MachineDetail" component={MachineDetail} />
-//       <Stack.Screen name="DownloadScreen" component={DownloadScreen} />
-      
-
-//     </Stack.Navigator>
-//   );
-// };
-
-// export default AppNavigator;
-
 
 
 
