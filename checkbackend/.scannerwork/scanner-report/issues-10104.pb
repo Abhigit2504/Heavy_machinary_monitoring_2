@@ -1,2 +1,0 @@
-j
-pythonS1542ORename function "getLogger" to match the regular expression ^[a-z_][a-z0-9_]*$.2 
