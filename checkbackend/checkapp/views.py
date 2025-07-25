@@ -77,6 +77,9 @@ def load_machine_data(gfrid=None, from_date=None, to_date=None):
 
 
 
+from django.utils.timezone import localtime
+import pytz
+
 @csrf_exempt
 def all_machines_view(request):
     try:
@@ -89,20 +92,28 @@ def all_machines_view(request):
         gfrids = queryset.order_by('GFRID').values_list('GFRID', flat=True).distinct()
         result = []
 
+        ist = pytz.timezone("Asia/Kolkata")
+
         for gfrid in gfrids:
             latest_event = MachineEvent.objects.filter(GFRID=gfrid).order_by('-TS').first()
+
+            ts_ist = localtime(latest_event.TS, ist).strftime('%Y-%m-%d %H:%M:%S') if latest_event and latest_event.TS else None
+            ts_off_ist = localtime(latest_event.TS_OFF, ist).strftime('%Y-%m-%d %H:%M:%S') if latest_event and latest_event.TS_OFF else None
+
             result.append({
                 "gfrid": gfrid,
                 "status": int(latest_event.status) if latest_event and latest_event.status is not None else None,
                 "last_alert": latest_event.alert if latest_event else None,
-                "last_seen": latest_event.TS.strftime('%Y-%m-%d %H:%M:%S') if latest_event and latest_event.TS else None,
+                "last_seen": ts_ist,
+                "ts": ts_ist,
+                "ts_off": ts_off_ist,
                 "telemetry": latest_event.jsonFile if latest_event and latest_event.jsonFile else {}
             })
 
         return JsonResponse(result, safe=False)
     except Exception as e:
         return JsonResponse({'error': str(e), 'trace': traceback.format_exc()}, status=500)
-    
+
     
 @csrf_exempt
 def machine_detail_view(request, gfrid):

@@ -1,4 +1,4 @@
-import React, { useEffect, useState, useRef } from 'react';
+import React, { useEffect, useState, useRef, memo } from 'react';
 import {
   View,
   Text,
@@ -11,6 +11,8 @@ import {
   Easing,
   ScrollView,
   Dimensions,
+  StatusBar,
+  Platform,
 } from 'react-native';
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import MaterialCommunityIcons from '@expo/vector-icons/MaterialCommunityIcons';
@@ -18,83 +20,246 @@ import { Ionicons } from '@expo/vector-icons';
 import axios from 'axios';
 import dayjs from 'dayjs';
 import { LinearGradient } from 'expo-linear-gradient';
+
+// Assuming BASE_URL is correctly configured in ../config.js
 import { BASE_URL } from '../config';
 
 const { width } = Dimensions.get('window');
+const SPACING = 16; // Consistent spacing
 
-// Sophisticated color palette
+// REVISED Color Palette: Vibrant & Focused Dashboard
 const COLORS = {
-  primaryDark: '#1A365D',       // Deep navy (trust, intelligence)
-  primaryLight: '#2C5282',      // Medium navy
-  success: '#2F855A',           // Forest green
-  successLight: '#38A169',      // Emerald green
-  warning: '#C05621',           // Burnt orange
-  warningLight: '#DD6B20',      // Bright orange
-  error: '#9B2C2C',            // Deep red
-  errorLight: '#C53030',       // Bright red
-  neutral: '#4A5568',          // Slate gray
-  neutralLight: '#718096',     // Light slate
-  background: '#F8FAFC',       // Very light gray
-  cardBg: '#FFFFFF',           // Pure white
-  textDark: '#1A202C',         // Near black
-  textMedium: '#4A5568',       // Medium gray
-  textLight: '#718096',        // Light gray
-  border: '#E2E8F0',           // Light border
+  background: '#E8F0FE', // A very light, cool blue
+  surface: '#FFFFFF', // Crisp white for cards
+  textPrimary: '#2C3E50', // Dark blue-gray for main text
+  textSecondary: '#627D98', // Muted blue for secondary text
+  border: '#D0E4F5', // Light blue for subtle borders
+  accent: '#3498DB', // Primary vibrant blue
+  accentLight: '#5DADE2', // Lighter blue for gradients
+
+  // Status Colors - Highly Visible & Intuitive
+  statusOn: '#2ECC71', // Bright Green for ON
+  statusOff: '#E74C3C', // Strong Red for OFF
+  statusWarning: '#F1C40F', // Golden Yellow for Warning
+  statusUnknown: '#95A5A6', // Muted Gray for Unknown
+
+  // Gradient Backgrounds for Status Indicators
+  gradientOn: ['#2ECC71', '#28B463'], // Green gradient
+  gradientOff: ['#E74C3C', '#C0392B'], // Red gradient
+  gradientWarning: ['#F1C40F', '#F39C12'], // Yellow gradient
+  gradientUnknown: ['#95A5A6', '#7F8C8D'], // Gray gradient
+
+  // Utilization Bar Colors
+  utilizationFill: '#3498DB', // Bright blue for the fill
+  utilizationBackground: '#EAEAEA', // Light gray for the empty part
+  utilizationGradient: ['#3498DB', '#288ADB'], // Gradient for the fill
+
+  shadow: 'rgba(0, 0, 0, 0.1)', // Standard shadow
+  shadowStrong: 'rgba(0, 0, 0, 0.15)', // Stronger shadow for interactive elements
 };
 
+// Helper function for timestamp formatting
+const formatTimestamp = (ts) => {
+  if (!ts) return 'N/A';
+  return dayjs(ts).format('DD MMM, hh:mm A');
+};
+
+// --- START: MachineItem COMPONENT ---
+const MachineItem = memo(({ item, index, machineStatusMap, navigation }) => {
+  const cardAnim = useRef(new Animated.Value(0)).current;
+
+  // Animation for card entry
+  useEffect(() => {
+    Animated.timing(cardAnim, {
+      toValue: 1,
+      duration: 500,
+      delay: index * 80,
+      useNativeDriver: true,
+      easing: Easing.out(Easing.ease),
+    }).start();
+  }, [item]);
+
+  const statusValue = item.status;
+  let statusText, statusIconName, IconComponent, gradientColors;
+
+  // Dynamic status text, icon, and colors
+  if (statusValue === 1) { // ON
+    statusText = 'ON';
+    statusIconName = 'power'; // A general power icon from MaterialCommunityIcons
+    IconComponent = MaterialCommunityIcons;
+    gradientColors = COLORS.gradientOn;
+  } else if (statusValue === 0) { // OFF
+    statusText = 'OFF';
+    statusIconName = 'power-off'; // MaterialCommunityIcons for off power icon
+    IconComponent = MaterialCommunityIcons;
+    gradientColors = COLORS.gradientOff;
+  } else { // UNKNOWN
+    statusText = 'UNKNOWN';
+    statusIconName = 'help-circle-outline'; // MaterialCommunityIcons
+    IconComponent = MaterialCommunityIcons;
+    gradientColors = COLORS.gradientUnknown;
+  }
+
+  // Retrieve utilization data
+  const usage = machineStatusMap[item.gfrid] || {};
+  const onPercent = usage.on_time_percentage || 0;
+  const onTimeMinutes = usage.on_time_sec ? Math.round(usage.on_time_sec / 60) : 0;
+
+  return (
+    <Animated.View
+      style={[
+        styles.machineTileWrapper,
+        {
+          opacity: cardAnim,
+          transform: [{
+            translateY: cardAnim.interpolate({
+              inputRange: [0, 1],
+              outputRange: [40, 0],
+            }),
+          }],
+        },
+      ]}
+    >
+      <TouchableOpacity
+        style={styles.machineTile}
+        onPress={() => navigation.navigate('MachineDetail', { gfrid: item.gfrid })}
+        activeOpacity={0.8}
+      >
+        {/* Status Pill with Icon and Text */}
+        <LinearGradient
+          colors={gradientColors}
+          start={{ x: 0, y: 0 }}
+          end={{ x: 1, y: 0 }}
+          style={styles.statusPill}
+        >
+          <IconComponent name={statusIconName} size={18} color={COLORS.surface} />
+          <Text style={styles.statusPillText}>{statusText}</Text>
+        </LinearGradient>
+
+        {/* Main Content Area */}
+        <View style={styles.tileContent}>
+          <View style={styles.tileTitleContainer}>
+            <MaterialCommunityIcons name="cog-box" size={24} color={COLORS.textPrimary} style={styles.titleIcon} />
+            <Text style={styles.tileTitle}>Machine GFRID: {item.gfrid}</Text>
+          </View>
+          <Text style={styles.tileLastUpdate}>Last Update: {formatTimestamp(item.ts_off || item.ts)}</Text>
+
+          {/* Utilization Graph (Progress Bar) */}
+          <View style={styles.utilizationContainer}>
+            <Text style={styles.utilizationLabel}>Utilization ({onPercent.toFixed(0)}%)</Text>
+            <View style={styles.progressBarBackground}>
+              <LinearGradient
+                colors={COLORS.utilizationGradient}
+                start={{ x: 0, y: 0 }}
+                end={{ x: 1, y: 0 }}
+                style={[
+                  styles.progressBarFill,
+                  { width: `${Math.min(100, onPercent)}%` }, // Cap at 100%
+                ]}
+              />
+            </View>
+          </View>
+
+          {/* Run Time Metric */}
+          <View style={styles.runTimeMetric}>
+            <MaterialCommunityIcons name="timer-outline" size={20} color={COLORS.textSecondary} />
+            <Text style={styles.runTimeText}>{onTimeMinutes} minutes active</Text>
+          </View>
+        </View>
+      </TouchableOpacity>
+    </Animated.View>
+  );
+});
+// --- END: MachineItem COMPONENT ---
+
+
+// --- START: MachineDashboard COMPONENT ---
 const MachineDashboard = ({ navigation }) => {
   const [machines, setMachines] = useState([]);
   const [machineStatusMap, setMachineStatusMap] = useState({});
   const [searchGfrid, setSearchGfrid] = useState('');
   const [loading, setLoading] = useState(true);
   const [user, setUser] = useState(null);
-  const [typedText, setTypedText] = useState('');
-  const fadeAnim = useRef(new Animated.Value(1)).current;
-  const slideAnim = useRef(new Animated.Value(-30)).current;
-  const cardAnimations = useRef([]).current;
-  const fullTextRef = useRef('');
-  const refreshIntervalRef = useRef(null);
+  const [welcomeMessage, setWelcomeMessage] = useState('');
+  const [isSearchBarVisible, setIsSearchBarVisible] = useState(false); // State for search bar visibility
 
-  const fetchUser = async () => {
-    const userData = await AsyncStorage.getItem('user');
-    if (userData) {
-      const parsed = JSON.parse(userData);
-      setUser(parsed);
-      fullTextRef.current = `Welcome, ${parsed.first_name} ${parsed.last_name}!`;
-      typeText();
-      animateWelcome();
-    }
-  };
+  // Animated values for header, search, and list entry animations
+  const headerOpacity = useRef(new Animated.Value(0)).current;
+  const headerTranslateY = useRef(new Animated.Value(-50)).current;
+  const searchBarOpacity = useRef(new Animated.Value(0)).current;
+  const searchBarTranslateY = useRef(new Animated.Value(-30)).current;
+  const listFadeIn = useRef(new Animated.Value(0)).current;
 
-  const typeText = () => {
-    let i = 0;
-    const fullText = fullTextRef.current;
-    const interval = setInterval(() => {
-      if (i <= fullText.length) {
-        setTypedText(fullText.slice(0, i));
-        i++;
-      } else {
-        clearInterval(interval);
-      }
-    }, 60);
-  };
+  // New animated values for welcome text "pulling" animation
+  const welcomeTextScale = useRef(new Animated.Value(0.8)).current;
+  const welcomeTextOpacity = useRef(new Animated.Value(0)).current;
+  const welcomeTextTranslateX = useRef(new Animated.Value(-50)).current; // Start off-screen to the left
 
-  const animateWelcome = () => {
+  // Function to run initial UI animations
+  const animateIn = () => {
     Animated.parallel([
-      Animated.timing(fadeAnim, {
-        toValue: 1,
-        duration: 800,
-        useNativeDriver: true,
+      Animated.timing(headerOpacity, {
+        toValue: 1, duration: 800, delay: 200, useNativeDriver: true, easing: Easing.out(Easing.ease),
       }),
-      Animated.timing(slideAnim, {
-        toValue: 0,
-        duration: 800,
-        easing: Easing.out(Easing.exp),
-        useNativeDriver: true,
+      Animated.timing(headerTranslateY, {
+        toValue: 0, duration: 800, delay: 200, useNativeDriver: true, easing: Easing.out(Easing.ease),
+      }),
+      Animated.timing(welcomeTextScale, {
+        toValue: 1, duration: 1000, delay: 400, useNativeDriver: true, easing: Easing.elastic(1),
+      }),
+      Animated.timing(welcomeTextOpacity, {
+        toValue: 1, duration: 800, delay: 400, useNativeDriver: true,
+      }),
+      Animated.timing(welcomeTextTranslateX, {
+        toValue: 0, duration: 1000, delay: 400, useNativeDriver: true, easing: Easing.out(Easing.ease),
+      }),
+      Animated.timing(listFadeIn, {
+        toValue: 1, duration: 1000, delay: 600, useNativeDriver: true, easing: Easing.out(Easing.ease),
       }),
     ]).start();
   };
 
+  // Toggle search bar visibility animation
+  const toggleSearchBar = () => {
+    setIsSearchBarVisible(prev => !prev);
+    Animated.parallel([
+      Animated.timing(searchBarOpacity, {
+        toValue: isSearchBarVisible ? 0 : 1, // If visible, fade out; if hidden, fade in
+        duration: 300,
+        useNativeDriver: true,
+        easing: Easing.ease,
+      }),
+      Animated.timing(searchBarTranslateY, {
+        toValue: isSearchBarVisible ? -30 : 0, // If visible, move up; if hidden, move to original position
+        duration: 300,
+        useNativeDriver: true,
+        easing: Easing.ease,
+      }),
+    ]).start();
+    // Clear search if hiding the bar
+    if (isSearchBarVisible) {
+      setSearchGfrid('');
+    }
+  };
+
+  // Fetch user data from AsyncStorage
+  const fetchUser = async () => {
+    try {
+      const userData = await AsyncStorage.getItem('user');
+      if (userData) {
+        const parsed = JSON.parse(userData);
+        setUser(parsed);
+        setWelcomeMessage(`Hello, ${parsed.first_name || 'User'}`);
+      } else {
+        setWelcomeMessage('Welcome!');
+      }
+    } catch (e) {
+      console.error("Failed to load user from AsyncStorage:", e);
+      setWelcomeMessage('Welcome!');
+    }
+  };
+
+  // Fetch status for a single machine from the API
   const fetchStatusData = async (gfrid) => {
     try {
       const response = await axios.get(`${BASE_URL}/api/machine-status/?gfrid=${gfrid}`);
@@ -108,16 +273,17 @@ const MachineDashboard = ({ navigation }) => {
       }
       return null;
     } catch (err) {
-      console.error(`Failed fetching status for GFRID ${gfrid}`, err.message);
+      console.error(`Failed fetching status for GFRID ${gfrid}:`, err.message);
       return null;
     }
   };
 
+  // Fetch all machines and their latest statuses
   const fetchMachines = async () => {
+    setLoading(true);
     try {
       const res = await axios.get(`${BASE_URL}/api/machines/`);
       const machineList = res.data;
-
       setMachines(machineList);
 
       const statusMap = {};
@@ -125,228 +291,156 @@ const MachineDashboard = ({ navigation }) => {
         const status = await fetchStatusData(m.gfrid);
         if (status) statusMap[m.gfrid] = status;
       }));
-
       setMachineStatusMap(statusMap);
     } catch (err) {
-      console.error(err);
+      console.error("Failed to fetch machines:", err);
     } finally {
       setLoading(false);
     }
   };
 
+  // Main useEffect: data fetching, animations, and refresh interval
   useEffect(() => {
     fetchUser();
     fetchMachines();
+    animateIn();
 
-    refreshIntervalRef.current = setInterval(fetchMachines, 3000);
-
-    return () => {
-      if (refreshIntervalRef.current) {
-        clearInterval(refreshIntervalRef.current);
-      }
-    };
+    const refreshInterval = setInterval(fetchMachines, 10000); // Refresh every 10 seconds
+    return () => clearInterval(refreshInterval); // Cleanup on unmount
   }, []);
 
-  const formatTimestamp = (ts) => {
-    if (!ts) return 'N/A';
-    return dayjs(ts).format('DD-MMM-YYYY, hh:mm A');
-  };
-
+  // Filter machines based on search input
   const filteredMachines = machines.filter((machine) =>
-    machine.gfrid.toString().includes(searchGfrid)
+    machine.gfrid.toString().toLowerCase().includes(searchGfrid.toLowerCase())
   );
 
-  const renderItem = ({ item, index }) => {
-    if (!cardAnimations[index]) {
-      cardAnimations[index] = new Animated.Value(0);
-      Animated.timing(cardAnimations[index], {
-        toValue: 1,
-        duration: 500,
-        delay: index * 100,
-        useNativeDriver: true,
-        easing: Easing.out(Easing.ease),
-      }).start();
-    }
+  // Render function for FlatList items
+  const renderItem = ({ item, index }) => (
+    <MachineItem
+      item={item}
+      index={index}
+      machineStatusMap={machineStatusMap}
+      navigation={navigation}
+    />
+  );
 
-    const statusValue = item.status;
-    let statusText, statusIcon, bgColor, statusColor, borderColor, gradientColors;
-
-    if (statusValue === 1) {
-      statusText = 'ACTIVE';
-      statusIcon = 'rocket-launch';
-      bgColor = '#EBF8F2';
-      statusColor = COLORS.success;
-      borderColor = '#BEE3D8';
-      gradientColors = [COLORS.success, COLORS.successLight];
-    } else if (statusValue === 0) {
-      statusText = 'INACTIVE';
-      statusIcon = 'power-off';
-      bgColor = '#FFF5F5';
-      statusColor = COLORS.error;
-      borderColor = '#FED7D7';
-      gradientColors = [COLORS.error, COLORS.errorLight];
-    } else {
-      statusText = 'UNKNOWN';
-      statusIcon = 'help-circle';
-      bgColor = '#EDF2F7';
-      statusColor = COLORS.neutral;
-      borderColor = '#E2E8F0';
-      gradientColors = [COLORS.neutral, COLORS.neutralLight];
-    }
-
-    const usage = machineStatusMap[item.gfrid] || {};
-    const onPercent = usage.on_time_percentage || 0;
-    const onTimeMinutes = usage.on_time_sec ? Math.round(usage.on_time_sec / 60) : 0;
-
-
-    return (
-      <Animated.View
-        style={{
-          opacity: cardAnimations[index],
-          transform: [
-            {
-              translateY: cardAnimations[index].interpolate({
-                inputRange: [0, 1],
-                outputRange: [50, 0],
-              }),
-            },
-          ],
-        }}
-      >
-        <TouchableOpacity
-          style={[styles.card, { borderColor }]}
-          onPress={() => navigation.navigate('MachineDetail', { gfrid: item.gfrid })}
-          activeOpacity={0.9}
-        >
-          <View style={styles.cardHeader}>
-            <LinearGradient
-              colors={[bgColor, '#FFFFFF']}
-              style={styles.machineIconContainer}
-              start={{ x: 0, y: 0 }}
-              end={{ x: 1, y: 1 }}
-            >
-              <MaterialCommunityIcons 
-                name="robot-industrial" 
-                size={28} 
-                color={statusColor} 
-              />
-            </LinearGradient>
-            <View style={styles.titleContainer}>
-              <Text style={styles.cardTitle}>Machine GFRID {item.gfrid}</Text>
-              <Text style={styles.cardSubtitle}>Last updated: {formatTimestamp(item.last_seen)}</Text>
-            </View>
-            <View style={[styles.statusPill, { backgroundColor: bgColor }]}>
-              <MaterialCommunityIcons 
-                name={statusIcon} 
-                size={16} 
-                color={statusColor} 
-              />
-              <Text style={[styles.statusText, { color: statusColor }]}>{statusText}</Text>
-            </View>
-          </View>
-
-          <View style={styles.usageContainer}>
-            <Text style={styles.usageTitle}>UTILIZATION METRICS</Text>
-            <View style={styles.usageBarContainer}>
-              <View style={styles.percentageDisplay}>
-                <Text style={[styles.percentageValue, { color: statusColor }]}>
-                  {onPercent.toFixed(0)}%
-                </Text>
-                <Text style={styles.percentageLabel}>Active time</Text>
-              </View>
-              <View style={styles.usageBarWrapper}>
-                <View style={styles.usageBarBackground}>
-                  <LinearGradient
-                    colors={gradientColors}
-                    start={{ x: 0, y: 0 }}
-                    end={{ x: 1, y: 0 }}
-                    style={[
-                      styles.usageBarFill, 
-                      { 
-                        width: `${onPercent}%`,
-                      }
-                    ]}
-                  >
-                    {onPercent > 15 && (
-                      <Text style={styles.usageBarText}>{onTimeMinutes}m</Text>
-                    )}
-                  </LinearGradient>
-                </View>
-                <View style={styles.usageBarLabels}>
-                  <Text style={styles.usageBarLabel}>0%</Text>
-                  <Text style={styles.usageBarLabel}>50%</Text>
-                  <Text style={styles.usageBarLabel}>100%</Text>
-                </View>
-              </View>
-            </View>
-          </View>
-        </TouchableOpacity>
-      </Animated.View>
-    );
-  };
-
-  if (loading) {
+  // Display a loading indicator when initial data is being fetched
+  if (loading && machines.length === 0) {
     return (
       <View style={styles.loadingContainer}>
-        <ActivityIndicator size="large" color={COLORS.primaryDark} />
+        <ActivityIndicator size="large" color={COLORS.accent} />
         <Text style={styles.loadingText}>Loading machine data...</Text>
       </View>
     );
   }
 
   return (
-    <ScrollView
-      style={styles.container}
-      contentContainerStyle={styles.scrollContainer}
-    >
-      {typedText !== '' && (
-        <Animated.Text
+    <View style={styles.container}>
+      <StatusBar barStyle="dark-content" backgroundColor={COLORS.background} />
+      <ScrollView
+        contentContainerStyle={styles.scrollContainer}
+        showsVerticalScrollIndicator={false}
+      >
+        {/* Header Section */}
+        <Animated.View
           style={[
-            styles.welcomeText,
+            styles.headerContainer,
             {
-              opacity: fadeAnim,
-              transform: [{ translateY: slideAnim }],
+              opacity: headerOpacity,
+              transform: [{ translateY: headerTranslateY }],
             },
           ]}
         >
-          {typedText}
-        </Animated.Text>
-      )}
+          <View style={styles.headerTopRow}>
+            <Animated.Text
+              style={[
+                styles.welcomeText,
+                {
+                  transform: [{ scale: welcomeTextScale }, { translateX: welcomeTextTranslateX }],
+                  opacity: welcomeTextOpacity,
+                }
+              ]}
+            >
+              {welcomeMessage}
+            </Animated.Text>
+            <TouchableOpacity onPress={toggleSearchBar} style={styles.searchToggleIcon}>
+              <Ionicons name="search" size={26} color={COLORS.textPrimary} />
+            </TouchableOpacity>
+          </View>
+          <Text style={styles.dashboardTitle}>Available Machines</Text>
+        </Animated.View>
 
-      <View style={styles.searchContainer}>
-        <Ionicons name="search" size={20} color={COLORS.textMedium} style={styles.searchIcon} />
-        <TextInput
-          style={styles.input}
-          placeholder="Search by machine ID..."
-          value={searchGfrid}
-          onChangeText={setSearchGfrid}
-          placeholderTextColor={COLORS.textLight}
-        />
-      </View>
+        {/* Search Bar Section (Conditionally rendered and animated) */}
+        {isSearchBarVisible && (
+          <Animated.View
+            style={[
+              styles.searchContainer,
+              {
+                opacity: searchBarOpacity,
+                transform: [{ translateY: searchBarTranslateY }],
+                // Ensures layout space is reserved even if hidden by opacity/translate
+                height: isSearchBarVisible ? 55 : 0,
+                marginBottom: isSearchBarVisible ? SPACING * 1.8 : 0,
+              },
+            ]}
+          >
+            <Ionicons name="search" size={20} color={COLORS.textSecondary} style={styles.searchIcon} />
+            <TextInput
+              style={styles.input}
+              placeholder="Search by Machine ID..."
+              value={searchGfrid}
+              onChangeText={setSearchGfrid}
+              placeholderTextColor={COLORS.textSecondary}
+              keyboardType="numeric"
+              maxLength={10}
+            />
+            {searchGfrid.length > 0 && (
+              <TouchableOpacity onPress={() => setSearchGfrid('')} style={styles.clearSearchIcon}>
+                <MaterialCommunityIcons name="close-circle" size={20} color={COLORS.textSecondary} />
+              </TouchableOpacity>
+            )}
+          </Animated.View>
+        )}
 
-      <FlatList
-        data={filteredMachines}
-        keyExtractor={(item) => item.gfrid.toString()}
-        renderItem={renderItem}
-        scrollEnabled={false}
-        contentContainerStyle={styles.listContainer}
-      />
-    </ScrollView>
+        {/* Conditional rendering for no results or the machine list */}
+        {filteredMachines.length === 0 && !loading ? (
+          <View style={styles.noResultsContainer}>
+            <MaterialCommunityIcons name="alert-circle-outline" size={60} color={COLORS.textSecondary} />
+            <Text style={styles.noResultsText}>No machines found matching "{searchGfrid}".</Text>
+            {searchGfrid.length > 0 && (
+              <TouchableOpacity onPress={() => setSearchGfrid('')} style={styles.clearSearchButton}>
+                <Text style={styles.clearSearchButtonText}>Clear Search</Text>
+              </TouchableOpacity>
+            )}
+          </View>
+        ) : (
+          <Animated.View style={{ opacity: listFadeIn }}>
+            <FlatList
+              data={Array.isArray(filteredMachines) ? filteredMachines : []}
+              keyExtractor={(item) => item.gfrid.toString()}
+              renderItem={renderItem}
+              scrollEnabled={false}
+              contentContainerStyle={styles.listContainer}
+              refreshing={loading && machines.length > 0}
+              onRefresh={fetchMachines}
+            />
+          </Animated.View>
+        )}
+      </ScrollView>
+    </View>
   );
 };
 
+// --- START: StyleSheet for the New Vision ---
 const styles = StyleSheet.create({
   container: {
     flex: 1,
     backgroundColor: COLORS.background,
+    paddingTop: Platform.OS === 'android' ? StatusBar.currentHeight : 0,
   },
   scrollContainer: {
-    paddingHorizontal: 20,
-    paddingTop: 24,
-    paddingBottom: 24,
-  },
-  listContainer: {
-    paddingBottom: 24,
+    paddingHorizontal: SPACING,
+    paddingVertical: SPACING,
   },
   loadingContainer: {
     flex: 1,
@@ -355,175 +449,204 @@ const styles = StyleSheet.create({
     backgroundColor: COLORS.background,
   },
   loadingText: {
-    marginTop: 16,
-    fontSize: 16,
-    color: COLORS.textMedium,
+    marginTop: SPACING,
+    fontSize: 18,
+    color: COLORS.textPrimary,
     fontWeight: '600',
   },
+  headerContainer: {
+    marginBottom: SPACING * 1.5,
+  },
+  headerTopRow: {
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+    alignItems: 'center',
+    marginBottom: SPACING / 2, // Adjusted to decrease margin below welcome text
+  },
   welcomeText: {
-    fontSize: 26,
-    fontWeight: '700',
-    marginBottom: 24,
-    color: COLORS.primaryDark,
-    textAlign: 'center',
-    letterSpacing: 0.5,
+    fontSize: 24, // Increased font size
+    fontWeight: '700', // Bolder
+    color: COLORS.textSecondary,
+    letterSpacing: -0.2,
+    // Removed marginBottom here as it's handled by headerTopRow's marginBottom
+  },
+  searchToggleIcon: {
+    padding: 5, // Make icon easier to tap
+  },
+  dashboardTitle: {
+    fontSize: 24, // Slightly larger for prominence
+    fontWeight: '800',
+    color: COLORS.textPrimary,
+    letterSpacing: -0.8, // Tighter letter spacing
   },
   searchContainer: {
     flexDirection: 'row',
     alignItems: 'center',
-    marginBottom: 24,
-    backgroundColor: COLORS.cardBg,
-    borderRadius: 12,
-    paddingHorizontal: 16,
-    height: 56,
+    backgroundColor: COLORS.surface,
+    borderRadius: 12, // More rounded corners
+    paddingHorizontal: SPACING,
+    height: 55, // Taller search bar
+    marginBottom: SPACING * 1.8, // More space below search
     borderWidth: 1,
     borderColor: COLORS.border,
-    shadowColor: '#000',
-    shadowOffset: { width: 0, height: 2 },
-    shadowOpacity: 0.05,
-    shadowRadius: 6,
-    elevation: 2,
+    shadowColor: COLORS.shadowStrong, // Stronger shadow
+    shadowOffset: { width: 0, height: 4 }, // More pronounced shadow
+    shadowOpacity: 0.15,
+    shadowRadius: 10, // Larger shadow blur
+    elevation: 6, // Increased elevation for Android
+    overflow: 'hidden', // Crucial for height animation
   },
   searchIcon: {
-    marginRight: 12,
+    marginRight: SPACING / 2,
   },
   input: {
     flex: 1,
     height: '100%',
-    fontSize: 16,
-    color: COLORS.textDark,
-    fontWeight: '500',
+    fontSize: 17, // Slightly larger text input
+    color: COLORS.textPrimary,
+    paddingVertical: 0,
   },
-  card: {
-    backgroundColor: COLORS.cardBg,
-    padding: 24,
-    marginBottom: 20,
-    borderRadius: 18,
-    borderWidth: 2,
-    shadowColor: '#000',
-    shadowOffset: { width: 0, height: 4 },
-    shadowOpacity: 0.08,
-    shadowRadius: 16,
-    elevation: 3,
+  clearSearchIcon: {
+    marginLeft: SPACING / 2,
+    padding: 5,
   },
-  cardHeader: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    marginBottom: 20,
+  listContainer: {
+    paddingBottom: SPACING, // Add some bottom padding to the list
   },
-  machineIconContainer: {
-    width: 60,
-    height: 60,
-    borderRadius: 16,
-    justifyContent: 'center',
-    alignItems: 'center',
-    marginRight: 16,
-    shadowColor: '#000',
-    shadowOffset: { width: 0, height: 2 },
-    shadowOpacity: 0.1,
-    shadowRadius: 4,
+  machineTileWrapper: {
+    marginBottom: SPACING,
+    borderRadius: 15, // More rounded corners for tiles
+    overflow: 'hidden',
+    shadowColor: COLORS.shadowStrong,
+    shadowOffset: { width: 0, height: 6 }, // More pronounced shadow
+    shadowOpacity: 0.2, // Slightly more opaque shadow
+    shadowRadius: 12, // Larger shadow blur
+    elevation: 8, // Increased elevation for Android
   },
-  titleContainer: {
-    flex: 1,
-  },
-  cardTitle: {
-    fontSize: 20,
-    fontWeight: '700',
-    color: COLORS.textDark,
-    marginBottom: 6,
-  },
-  cardSubtitle: {
-    fontSize: 14,
-    color: COLORS.textMedium,
-    fontWeight: '500',
+  machineTile: {
+    backgroundColor: COLORS.surface,
+    borderRadius: 15,
+    overflow: 'hidden',
+    padding: SPACING * 1.2, // Slightly more padding inside the tile
   },
   statusPill: {
     flexDirection: 'row',
     alignItems: 'center',
-    paddingHorizontal: 14,
-    paddingVertical: 8,
-    borderRadius: 24,
-    shadowColor: '#000',
-    shadowOffset: { width: 0, height: 1 },
-    shadowOpacity: 0.1,
-    shadowRadius: 2,
+    paddingHorizontal: 14, // Wider pill
+    paddingVertical: 7, // Taller pill
+    borderRadius: 25, // More rounded pill shape
+    alignSelf: 'flex-start',
+    marginBottom: SPACING * 1.2, // More space below the pill
   },
-  statusText: {
-    fontSize: 14,
+  statusPillText: {
+    fontSize: 15, // Slightly larger status text
     fontWeight: '700',
-    marginLeft: 6,
-    textTransform: 'uppercase',
-    letterSpacing: 0.5,
-  },
-  usageContainer: {
-    marginTop: 16,
-    padding: 20,
-    backgroundColor: '#F8FAFC',
-    borderRadius: 16,
-    borderWidth: 1,
-    borderColor: COLORS.border,
-  },
-  usageTitle: {
-    fontSize: 13,
-    fontWeight: '700',
-    color: COLORS.textMedium,
-    marginBottom: 16,
-    letterSpacing: 0.5,
+    color: COLORS.surface,
+    marginLeft: 8,
     textTransform: 'uppercase',
   },
-  usageBarContainer: {
+  tileContent: {
+    // No changes needed here
+  },
+  tileTitleContainer: {
     flexDirection: 'row',
     alignItems: 'center',
-  },
-  percentageDisplay: {
-    width: 80,
-    alignItems: 'center',
-    marginRight: 20,
-  },
-  percentageValue: {
-    fontSize: 24,
-    fontWeight: '800',
     marginBottom: 6,
   },
-  percentageLabel: {
-    fontSize: 13,
-    color: COLORS.textMedium,
+  titleIcon: {
+    marginRight: 8,
+  },
+  tileTitle: {
+    fontSize: 20, // Larger title
+    fontWeight: '700',
+    color: COLORS.textPrimary,
+  },
+  tileLastUpdate: {
+    fontSize: 14, // Slightly larger last update text
+    color: COLORS.textSecondary,
+    fontStyle: 'italic',
+    marginBottom: SPACING * 1.8, // More space below
+    borderBottomWidth: 1,
+    borderBottomColor: COLORS.border,
+    paddingBottom: SPACING / 1.5, // More padding below border
+  },
+  utilizationContainer: {
+    marginBottom: SPACING * 1.2, // More space below the bar
+  },
+  utilizationLabel: {
+    fontSize: 15, // Slightly larger label
     fontWeight: '600',
+    color: COLORS.textPrimary,
+    marginBottom: 10, // More space above the bar
   },
-  usageBarWrapper: {
-    flex: 1,
-  },
-  usageBarBackground: {
-    height: 24,
-    borderRadius: 12,
-    backgroundColor: '#EDF2F7',
+  progressBarBackground: {
+    height: 14, // Thicker progress bar
+    backgroundColor: COLORS.utilizationBackground,
+    borderRadius: 7, // More rounded corners
     overflow: 'hidden',
-    marginBottom: 8,
+    // Added shadow for better UI
+    shadowColor: COLORS.shadow,
+    shadowOffset: { width: 0, height: 2 },
+    shadowOpacity: 0.1,
+    shadowRadius: 4,
+    elevation: 2,
   },
-  usageBarFill: {
+  progressBarFill: {
     height: '100%',
-    borderRadius: 12,
-    justifyContent: 'center',
-    alignItems: 'flex-end',
-    paddingRight: 10,
+    // Background color is now handled by LinearGradient in the component
+    borderRadius: 7,
   },
-  usageBarText: {
-    color: 'white',
-    fontWeight: 'bold',
-    fontSize: 12,
-    textShadowColor: 'rgba(0,0,0,0.2)',
-    textShadowOffset: { width: 0, height: 1 },
-    textShadowRadius: 2,
-  },
-  usageBarLabels: {
+  runTimeMetric: {
     flexDirection: 'row',
-    justifyContent: 'space-between',
-    paddingHorizontal: 4,
+    alignItems: 'center',
+    paddingTop: SPACING / 2,
   },
-  usageBarLabel: {
-    fontSize: 11,
-    color: COLORS.textLight,
+  runTimeText: {
+    fontSize: 15, // Slightly larger runtime text
+    color: COLORS.textSecondary,
+    marginLeft: 10, // More space from icon
+    fontWeight: '500',
+  },
+  noResultsContainer: {
+    justifyContent: 'center',
+    alignItems: 'center',
+    paddingVertical: SPACING * 2.5, // More vertical padding
+    backgroundColor: COLORS.surface,
+    borderRadius: 15, // More rounded corners
+    borderWidth: 1,
+    borderColor: COLORS.border,
+    shadowColor: COLORS.shadowStrong,
+    shadowOffset: { width: 0, height: 4 },
+    shadowOpacity: 0.15,
+    shadowRadius: 10,
+    elevation: 6,
+    marginTop: SPACING * 1.5,
+  },
+  noResultsText: {
+    fontSize: 18, // Larger no results text
+    color: COLORS.textSecondary,
     fontWeight: '600',
+    marginTop: SPACING,
+    textAlign: 'center',
+    paddingHorizontal: SPACING,
+    lineHeight: 25, // Better line height
+  },
+  clearSearchButton: {
+    marginTop: SPACING * 1.8, // More space above button
+    paddingVertical: 14, // Taller button
+    paddingHorizontal: 30, // Wider button
+    backgroundColor: COLORS.accent,
+    borderRadius: 30,
+    shadowColor: COLORS.shadowStrong,
+    shadowOffset: { width: 0, height: 4 },
+    shadowOpacity: 0.3, // More pronounced shadow for button
+    shadowRadius: 8,
+    elevation: 7, // Increased elevation
+  },
+  clearSearchButtonText: {
+    color: COLORS.surface,
+    fontSize: 17, // Larger button text
+    fontWeight: '700',
   },
 });
 
