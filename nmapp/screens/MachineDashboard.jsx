@@ -9,257 +9,392 @@ import {
   ActivityIndicator,
   Animated,
   Easing,
-  ScrollView,
   Dimensions,
   StatusBar,
   Platform,
+  ImageBackground,
+  ScrollView
 } from 'react-native';
 import AsyncStorage from '@react-native-async-storage/async-storage';
-import MaterialCommunityIcons from '@expo/vector-icons/MaterialCommunityIcons';
-import { Ionicons } from '@expo/vector-icons';
+import { Ionicons, MaterialIcons } from '@expo/vector-icons';
+import { MaterialCommunityIcons, Feather } from '@expo/vector-icons';
 import axios from 'axios';
+import Icon from 'react-native-vector-icons/MaterialIcons';
 import dayjs from 'dayjs';
 import { LinearGradient } from 'expo-linear-gradient';
-
-// Assuming BASE_URL is correctly configured in ../config.js
 import { BASE_URL } from '../config';
 
-const { width } = Dimensions.get('window');
-const SPACING = 16; // Consistent spacing
 
-// REVISED Color Palette: Vibrant & Focused Dashboard
+const { width, height } = Dimensions.get('window');
+const SPACING = 20;
+const AVATAR_SIZE = 50;
+const MACHINE_ICON_SIZE = 40;
+const GRAPH_HEIGHT = 200;
+const GRAPH_BAR_WIDTH = 40;
+const GRAPH_SPACING = 15;
+
 const COLORS = {
-  background: '#E8F0FE', // A very light, cool blue
-  surface: '#FFFFFF', // Crisp white for cards
-  textPrimary: '#2C3E50', // Dark blue-gray for main text
-  textSecondary: '#627D98', // Muted blue for secondary text
-  border: '#D0E4F5', // Light blue for subtle borders
-  accent: '#3498DB', // Primary vibrant blue
-  accentLight: '#5DADE2', // Lighter blue for gradients
-
-  // Status Colors - Highly Visible & Intuitive
-  statusOn: '#2ECC71', // Bright Green for ON
-  statusOff: '#E74C3C', // Strong Red for OFF
-  statusWarning: '#F1C40F', // Golden Yellow for Warning
-  statusUnknown: '#95A5A6', // Muted Gray for Unknown
-
-  // Gradient Backgrounds for Status Indicators
-  gradientOn: ['#2ECC71', '#28B463'], // Green gradient
-  gradientOff: ['#E74C3C', '#C0392B'], // Red gradient
-  gradientWarning: ['#F1C40F', '#F39C12'], // Yellow gradient
-  gradientUnknown: ['#95A5A6', '#7F8C8D'], // Gray gradient
-
-  // Utilization Bar Colors
-  utilizationFill: '#3498DB', // Bright blue for the fill
-  utilizationBackground: '#EAEAEA', // Light gray for the empty part
-  utilizationGradient: ['#3498DB', '#288ADB'], // Gradient for the fill
-
-  shadow: 'rgba(0, 0, 0, 0.1)', // Standard shadow
-  shadowStrong: 'rgba(0, 0, 0, 0.15)', // Stronger shadow for interactive elements
+  primary: '#2A4D69',
+  secondary: '#4B86B4',
+  accent: '#63B3ED',
+  background: '#F0F4F8',
+  surface: '#FFFFFF',
+  textPrimary: '#2D3748',
+  textSecondary: '#718096',
+  success: '#48BB78',
+  warning: '#ED8936',
+  danger: '#F56565',
+  info: '#4299E1',
+  divider: '#E2E8F0',
+  shadow: 'rgba(0,0,0,0.1)',
+  shadowDark: 'rgba(0,0,0,0.2)',
+  gradientPrimary: ['#2A4D69', '#4B86B4'],
+  gradientSuccess: ['#48BB78', '#68D391'],
+  gradientWarning: ['#ED8936', '#F6AD55'],
+  gradientDanger: ['#F56565', '#FC8181'],
+  statusActive: '#38A169',
+  statusIdle: '#3182CE',
+  statusOffline: '#718096',
+  statusError: '#E53E3E',
+  statusMaintenance: '#D69E2E'
 };
 
-// Helper function for timestamp formatting
 const formatTimestamp = (ts) => {
-  if (!ts) return 'N/A';
-  return dayjs(ts).format('DD MMM, hh:mm A');
+  if (!ts) return 'Never updated';
+  return dayjs(ts).format('MMM D, h:mm A');
 };
 
-// --- START: MachineItem COMPONENT ---
-const MachineItem = memo(({ item, index, machineStatusMap, navigation }) => {
-  const cardAnim = useRef(new Animated.Value(0)).current;
+const getStatusDetails = (statusValue) => {
+  switch(statusValue) {
+    case 1: // Active
+      return {
+        text: 'Active',
+        icon: 'power',
+        color: COLORS.statusActive,
+        gradient: COLORS.gradientSuccess,
+        iconColor: '#FFFFFF'
+      };
+    case 0: // Off
+      return {
+        text: 'Offline',
+        icon: 'power-off',
+        color: COLORS.statusOffline,
+        gradient: COLORS.gradientDanger,
+        iconColor: '#FFFFFF'
+      };
+    case 2: // Maintenance
+      return {
+        text: 'Maintenance',
+        icon: 'tools',
+        color: COLORS.statusMaintenance,
+        gradient: COLORS.gradientWarning,
+        iconColor: '#FFFFFF'
+      };
+    case 3: // Error
+      return {
+        text: 'Error',
+        icon: 'alert-circle',
+        color: COLORS.statusError,
+        gradient: COLORS.gradientDanger,
+        iconColor: '#FFFFFF'
+      };
+    default: // Idle
+      return {
+        text: 'Idle',
+        icon: 'power-sleep',
+        color: COLORS.statusIdle,
+        gradient: COLORS.gradientPrimary,
+        iconColor: '#FFFFFF'
+      };
+  }
+};
 
-  // Animation for card entry
+const StatusSummary = ({ machines }) => {
+  const statusCounts = machines.reduce((counts, machine) => {
+    const status = machine.status;
+    counts[status] = (counts[status] || 0) + 1;
+    return counts;
+  }, {});
+
+  const onlineCount = statusCounts[1] || 0; // Active machines
+  const offlineCount = statusCounts[0] || 0; // Offline machines
+  const otherCount = machines.length - onlineCount - offlineCount; // Other statuses
+
+  return (
+    <View style={styles.statusSummaryContainer}>
+      <View style={styles.statusSummaryItem}>
+        <View style={[styles.statusIndicator, { backgroundColor: COLORS.statusActive }]} />
+        <Text style={styles.statusSummaryText}>Online: {onlineCount}</Text>
+      </View>
+      <View style={styles.statusSummaryItem}>
+        <View style={[styles.statusIndicator, { backgroundColor: COLORS.statusOffline }]} />
+        <Text style={styles.statusSummaryText}>Offline: {offlineCount}</Text>
+      </View>
+      {/* <View style={styles.statusSummaryItem}>
+        <View style={[styles.statusIndicator, { backgroundColor: COLORS.statusMaintenance }]} />
+        <Text style={styles.statusSummaryText}>Others: {otherCount}</Text>
+      </View> */}
+    </View>
+  );
+};
+
+const UtilizationDistribution = ({ machines, machineStatusMap }) => {
+  if (!machines || machines.length === 0) return null;
+
+  // Calculate total active time across all machines (in seconds)
+  const totalActiveSeconds = machines.reduce((total, machine) => {
+    const usage = machineStatusMap[machine.gfrid] || {};
+    return total + (usage.on_time_sec || 0);
+  }, 0);
+
+  // Convert to minutes
+  const totalActiveMinutes = Math.round(totalActiveSeconds / 60);
+  
+  // Calculate total possible time (assuming all machines running for same period)
+  // This assumes a fixed period for "total possible time" for overall utilization.
+  // If this should be dynamic based on actual uptime of the dashboard, adjust this value.
+  const totalPossibleMinutes = 60; // Assuming a 60-minute reference for overall utilization
+  
+  // Calculate overall utilization percentage
+  const overallUtilization = Math.min(100, Math.round((totalActiveSeconds / (totalPossibleMinutes * 60)) * 100));
+
+  // Calculate each machine's contribution to the total active time
+  const machineContributions = machines.map(machine => {
+    const usage = machineStatusMap[machine.gfrid] || {};
+    const machineMinutes = Math.round((usage.on_time_sec || 0) / 60);
+    const contribution = totalActiveSeconds > 0 
+      ? (usage.on_time_sec / totalActiveSeconds) * 100 
+      : 0;
+      
+    return {
+      machine,
+      minutes: machineMinutes,
+      contribution: contribution,
+      status: getStatusDetails(machine.status)
+    };
+  });
+
+  // Sort by contribution (highest first)
+  machineContributions.sort((a, b) => b.contribution - a.contribution);
+
+  return (
+    <View style={styles.distributionContainer}>
+      <Text style={styles.sectionTitle}>Utilization Overview </Text>
+        <Text>★Last 1 hour</Text>
+      
+      <View style={styles.overallUtilization}>
+        <Text style={styles.overallText}>
+          Total Active Time: {totalActiveMinutes} min ({overallUtilization}% utilization)
+        </Text>
+        <View style={styles.overallBar}>
+          <LinearGradient
+            colors={['#4FD1C5', '#38B2AC']}
+            style={[styles.overallBarFill, { width: `${overallUtilization}%` }]}
+            start={{ x: 0, y: 0 }}
+            end={{ x: 1, y: 0 }}
+          />
+        </View>
+      </View>
+      
+      <Text style={styles.sectionSubtitle}>Machine Contribution</Text>
+      
+      <ScrollView 
+        horizontal 
+        showsHorizontalScrollIndicator={false}
+        style={styles.distributionScroll}
+      >
+        {machineContributions.map((item) => (
+          <View key={item.machine.gfrid} style={styles.contributionItem}>
+            <View style={styles.contributionBarContainer}>
+              <View 
+                style={[
+                  styles.contributionBar,
+                  { 
+                    height: `${item.contribution}%`,
+                    backgroundColor: item.status.color
+                  }
+                ]}
+              />
+            </View>
+            <View style={styles.contributionLabel}>
+              <Text style={styles.contributionText} numberOfLines={1}>
+                {item.machine.name || `M${item.machine.gfrid}`}
+              </Text>
+              <Text style={styles.contributionPercent}>
+                {item.contribution.toFixed(1)}%
+              </Text>
+              <Text style={styles.contributionMinutes}>
+                {item.minutes} min
+              </Text>
+            </View>
+          </View>
+        ))}
+      </ScrollView>
+    </View>
+  );
+};
+
+const MachineItem = memo(({ item, index, machineStatusMap, machineContributions, navigation }) => {
+  const cardAnim = useRef(new Animated.Value(0)).current;
+  const status = getStatusDetails(item.status);
+  const usage = machineStatusMap[item.gfrid] || {};
+  const utilization = usage.on_time_percentage || 0;
+  const activeMinutes = usage.on_time_sec ? Math.round(usage.on_time_sec / 60) : 0;
+
+  // Find the contribution for this specific machine
+  const machineContribution = machineContributions.find(
+    (contrib) => contrib.machine.gfrid === item.gfrid
+  );
+  const contributionPercentage = machineContribution
+    ? machineContribution.contribution.toFixed(1)
+    : '0.0';
+
   useEffect(() => {
     Animated.timing(cardAnim, {
       toValue: 1,
       duration: 500,
-      delay: index * 80,
+      delay: index * 100,
       useNativeDriver: true,
       easing: Easing.out(Easing.ease),
     }).start();
   }, [item]);
 
-  const statusValue = item.status;
-  let statusText, statusIconName, IconComponent, gradientColors;
-
-  // Dynamic status text, icon, and colors
-  if (statusValue === 1) { // ON
-    statusText = 'ON';
-    statusIconName = 'power'; // A general power icon from MaterialCommunityIcons
-    IconComponent = MaterialCommunityIcons;
-    gradientColors = COLORS.gradientOn;
-  } else if (statusValue === 0) { // OFF
-    statusText = 'OFF';
-    statusIconName = 'power-off'; // MaterialCommunityIcons for off power icon
-    IconComponent = MaterialCommunityIcons;
-    gradientColors = COLORS.gradientOff;
-  } else { // UNKNOWN
-    statusText = 'UNKNOWN';
-    statusIconName = 'help-circle-outline'; // MaterialCommunityIcons
-    IconComponent = MaterialCommunityIcons;
-    gradientColors = COLORS.gradientUnknown;
-  }
-
-  // Retrieve utilization data
-  const usage = machineStatusMap[item.gfrid] || {};
-  const onPercent = usage.on_time_percentage || 0;
-  const onTimeMinutes = usage.on_time_sec ? Math.round(usage.on_time_sec / 60) : 0;
-
   return (
     <Animated.View
       style={[
-        styles.machineTileWrapper,
+        styles.machineCardWrapper,
         {
           opacity: cardAnim,
           transform: [{
             translateY: cardAnim.interpolate({
               inputRange: [0, 1],
-              outputRange: [40, 0],
+              outputRange: [50, 0],
             }),
           }],
         },
       ]}
     >
       <TouchableOpacity
-        style={styles.machineTile}
-        onPress={() => navigation.navigate('MachineDetail', { gfrid: item.gfrid })}
-        activeOpacity={0.8}
+        style={styles.machineCard}
+        onPress={() => navigation.navigate('MachineDetail', { 
+          gfrid: item.gfrid,
+          machineData: item,
+          statusData: status
+        })}
+        activeOpacity={0.9}
       >
-        {/* Status Pill with Icon and Text */}
-        <LinearGradient
-          colors={gradientColors}
-          start={{ x: 0, y: 0 }}
-          end={{ x: 1, y: 0 }}
-          style={styles.statusPill}
-        >
-          <IconComponent name={statusIconName} size={18} color={COLORS.surface} />
-          <Text style={styles.statusPillText}>{statusText}</Text>
-        </LinearGradient>
-
-        {/* Main Content Area */}
-        <View style={styles.tileContent}>
-          <View style={styles.tileTitleContainer}>
-            <MaterialCommunityIcons name="cog-box" size={24} color={COLORS.textPrimary} style={styles.titleIcon} />
-            <Text style={styles.tileTitle}>Machine GFRID: {item.gfrid}</Text>
-          </View>
-          <Text style={styles.tileLastUpdate}>Last Update: {formatTimestamp(item.ts_off || item.ts)}</Text>
-
-          {/* Utilization Graph (Progress Bar) */}
-          <View style={styles.utilizationContainer}>
-            <Text style={styles.utilizationLabel}>Utilization ({onPercent.toFixed(0)}%)</Text>
-            <View style={styles.progressBarBackground}>
-              <LinearGradient
-                colors={COLORS.utilizationGradient}
-                start={{ x: 0, y: 0 }}
-                end={{ x: 1, y: 0 }}
-                style={[
-                  styles.progressBarFill,
-                  { width: `${Math.min(100, onPercent)}%` }, // Cap at 100%
-                ]}
-              />
+        <View style={[styles.statusIndicator, { backgroundColor: status.color }]} />
+        
+        <View style={styles.machineContent}>
+          <View style={styles.machineHeader}>
+            <View style={styles.machineIcon}>
+              <Icon name="precision-manufacturing" size={24} color={COLORS.primary} />
+            </View>
+            <View>
+              <Text style={styles.machineId}>ID: {item.gfrid}</Text>
+              <Text style={styles.machineName}>
+                {item.name || `Machine GFRID ${item.gfrid}`}
+              </Text>
             </View>
           </View>
-
-          {/* Run Time Metric */}
-          <View style={styles.runTimeMetric}>
-            <MaterialCommunityIcons name="timer-outline" size={20} color={COLORS.textSecondary} />
-            <Text style={styles.runTimeText}>{onTimeMinutes} minutes active</Text>
+          
+          <View style={styles.statusRow}>
+            <LinearGradient
+              colors={status.gradient}
+              style={styles.statusBadge}
+              start={{ x: 0, y: 0 }}
+              end={{ x: 1, y: 0 }}
+            >
+              <MaterialCommunityIcons 
+                name={status.icon} 
+                size={18} 
+                color={status.iconColor} 
+              />
+              <Text style={styles.statusText}>{status.text}</Text>
+            </LinearGradient>
+            
+            <View style={styles.lastUpdated}>
+              <Text>From :</Text>
+              {/* <Feather name="clock" size={14} color={COLORS.textSecondary} /> */}
+              <Text style={styles.lastUpdatedText}>
+                
+                {formatTimestamp(item.ts_off || item.ts)}
+              </Text>
+            </View>
+          </View>
+          
+          <View style={styles.utilizationContainer}>
+            <View style={styles.utilizationHeader}>
+              <Text style={styles.utilizationLabel}>UTILIZATION</Text>
+              <Text style={styles.utilizationPercent}>{utilization.toFixed(0)}%</Text>
+            </View>
+            <View style={styles.progressBarBackground}>
+              <LinearGradient
+                colors={['#4FD1C5', '#38B2AC']}
+                style={[
+                  styles.progressBarFill,
+                  { width: `${Math.min(100, utilization)}%` }
+                ]}
+                start={{ x: 0, y: 0 }}
+                end={{ x: 1, y: 0 }}
+              />
+              {/* Utilization Bar Markings */}
+              <View style={styles.progressBarMarkings}>
+                {[0, 25, 50, 75, 100].map((mark) => (
+                  <View key={mark} style={[styles.progressBarMark, { left: `${mark}%` }]}>
+                    <View style={styles.progressBarMarkLine} />
+                    <Text style={styles.progressBarMarkText}>{mark}%</Text>
+                  </View>
+                ))}
+              </View>
+            </View>
+          </View>
+          
+          <View style={styles.metricsRow}>
+            <View style={styles.metricItem}>
+              <MaterialCommunityIcons 
+                name="timer-outline" 
+                size={20} 
+                color={COLORS.textSecondary} 
+              />
+              <Text style={styles.metricText}>{activeMinutes} min active</Text>
+            </View>
+            <Text style={styles.machineContributionText}>
+              Contribution:
+              {contributionPercentage}%
+            </Text>
           </View>
         </View>
       </TouchableOpacity>
     </Animated.View>
   );
 });
-// --- END: MachineItem COMPONENT ---
 
-
-// --- START: MachineDashboard COMPONENT ---
 const MachineDashboard = ({ navigation }) => {
   const [machines, setMachines] = useState([]);
   const [machineStatusMap, setMachineStatusMap] = useState({});
-  const [searchGfrid, setSearchGfrid] = useState('');
+  const [searchQuery, setSearchQuery] = useState('');
   const [loading, setLoading] = useState(true);
   const [user, setUser] = useState(null);
-  const [welcomeMessage, setWelcomeMessage] = useState('');
-  const [isSearchBarVisible, setIsSearchBarVisible] = useState(false); // State for search bar visibility
+  const [refreshing, setRefreshing] = useState(false);
+  const [showSearch, setShowSearch] = useState(false);
+  const [showStats, setShowStats] = useState(true);
+  
+  const headerAnim = useRef(new Animated.Value(0)).current;
+  const contentAnim = useRef(new Animated.Value(0)).current;
+  const searchAnim = useRef(new Animated.Value(0)).current;
 
-  // Animated values for header, search, and list entry animations
-  const headerOpacity = useRef(new Animated.Value(0)).current;
-  const headerTranslateY = useRef(new Animated.Value(-50)).current;
-  const searchBarOpacity = useRef(new Animated.Value(0)).current;
-  const searchBarTranslateY = useRef(new Animated.Value(-30)).current;
-  const listFadeIn = useRef(new Animated.Value(0)).current;
-
-  // New animated values for welcome text "pulling" animation
-  const welcomeTextScale = useRef(new Animated.Value(0.8)).current;
-  const welcomeTextOpacity = useRef(new Animated.Value(0)).current;
-  const welcomeTextTranslateX = useRef(new Animated.Value(-50)).current; // Start off-screen to the left
-
-  // Function to run initial UI animations
-  const animateIn = () => {
-    Animated.parallel([
-      Animated.timing(headerOpacity, {
-        toValue: 1, duration: 800, delay: 200, useNativeDriver: true, easing: Easing.out(Easing.ease),
-      }),
-      Animated.timing(headerTranslateY, {
-        toValue: 0, duration: 800, delay: 200, useNativeDriver: true, easing: Easing.out(Easing.ease),
-      }),
-      Animated.timing(welcomeTextScale, {
-        toValue: 1, duration: 1000, delay: 400, useNativeDriver: true, easing: Easing.elastic(1),
-      }),
-      Animated.timing(welcomeTextOpacity, {
-        toValue: 1, duration: 800, delay: 400, useNativeDriver: true,
-      }),
-      Animated.timing(welcomeTextTranslateX, {
-        toValue: 0, duration: 1000, delay: 400, useNativeDriver: true, easing: Easing.out(Easing.ease),
-      }),
-      Animated.timing(listFadeIn, {
-        toValue: 1, duration: 1000, delay: 600, useNativeDriver: true, easing: Easing.out(Easing.ease),
-      }),
-    ]).start();
-  };
-
-  // Toggle search bar visibility animation
-  const toggleSearchBar = () => {
-    setIsSearchBarVisible(prev => !prev);
-    Animated.parallel([
-      Animated.timing(searchBarOpacity, {
-        toValue: isSearchBarVisible ? 0 : 1, // If visible, fade out; if hidden, fade in
-        duration: 300,
-        useNativeDriver: true,
-        easing: Easing.ease,
-      }),
-      Animated.timing(searchBarTranslateY, {
-        toValue: isSearchBarVisible ? -30 : 0, // If visible, move up; if hidden, move to original position
-        duration: 300,
-        useNativeDriver: true,
-        easing: Easing.ease,
-      }),
-    ]).start();
-    // Clear search if hiding the bar
-    if (isSearchBarVisible) {
-      setSearchGfrid('');
-    }
-  };
-
-  // Fetch user data from AsyncStorage
   const fetchUser = async () => {
     try {
       const userData = await AsyncStorage.getItem('user');
       if (userData) {
-        const parsed = JSON.parse(userData);
-        setUser(parsed);
-        setWelcomeMessage(`Hello, ${parsed.first_name || 'User'}`);
-      } else {
-        setWelcomeMessage('Welcome!');
+        setUser(JSON.parse(userData));
       }
     } catch (e) {
-      console.error("Failed to load user from AsyncStorage:", e);
-      setWelcomeMessage('Welcome!');
+      console.error("Failed to load user:", e);
     }
   };
-
-  // Fetch status for a single machine from the API
+  
   const fetchStatusData = async (gfrid) => {
     try {
       const response = await axios.get(`${BASE_URL}/api/machine-status/?gfrid=${gfrid}`);
@@ -273,19 +408,18 @@ const MachineDashboard = ({ navigation }) => {
       }
       return null;
     } catch (err) {
-      console.error(`Failed fetching status for GFRID ${gfrid}:`, err.message);
+      console.error(`Failed fetching status for ${gfrid}:`, err);
       return null;
     }
   };
-
-  // Fetch all machines and their latest statuses
+  
   const fetchMachines = async () => {
-    setLoading(true);
+    setRefreshing(true);
     try {
       const res = await axios.get(`${BASE_URL}/api/machines/`);
       const machineList = res.data;
       setMachines(machineList);
-
+      
       const statusMap = {};
       await Promise.all(machineList.map(async (m) => {
         const status = await fetchStatusData(m.gfrid);
@@ -296,151 +430,242 @@ const MachineDashboard = ({ navigation }) => {
       console.error("Failed to fetch machines:", err);
     } finally {
       setLoading(false);
+      setRefreshing(false);
     }
   };
-
-  // Main useEffect: data fetching, animations, and refresh interval
+  
   useEffect(() => {
     fetchUser();
     fetchMachines();
-    animateIn();
-
-    const refreshInterval = setInterval(fetchMachines, 10000); // Refresh every 10 seconds
-    return () => clearInterval(refreshInterval); // Cleanup on unmount
+    
+    Animated.parallel([
+      Animated.timing(headerAnim, {
+        toValue: 1,
+        duration: 600,
+        delay: 200,
+        useNativeDriver: true,
+        easing: Easing.out(Easing.ease),
+      }),
+      Animated.timing(contentAnim, {
+        toValue: 1,
+        duration: 600,
+        delay: 600,
+        useNativeDriver: true,
+        easing: Easing.out(Easing.ease),
+      }),
+    ]).start();
+    
+    const interval = setInterval(fetchMachines, 30000);
+    return () => clearInterval(interval);
   }, []);
+  
+  useEffect(() => {
+    if (showSearch) {
+      Animated.timing(searchAnim, {
+        toValue: 1,
+        duration: 300,
+        useNativeDriver: true,
+      }).start();
+    } else {
+      Animated.timing(searchAnim, {
+        toValue: 0,
+        duration: 200,
+        useNativeDriver: true,
+      }).start(() => setSearchQuery(''));
+    }
+  }, [showSearch]);
 
-  // Filter machines based on search input
-  const filteredMachines = machines.filter((machine) =>
-    machine.gfrid.toString().toLowerCase().includes(searchGfrid.toLowerCase())
+  const filteredMachines = machines.filter(machine =>
+    machine.gfrid.toString().includes(searchQuery) ||
+    (machine.name && machine.name.toLowerCase().includes(searchQuery.toLowerCase()))
   );
 
-  // Render function for FlatList items
+  // Calculate machine contributions for all machines once to pass to MachineItem
+  const machineContributions = filteredMachines.map(machine => {
+    const usage = machineStatusMap[machine.gfrid] || {};
+    const totalActiveSeconds = filteredMachines.reduce((total, m) => {
+      const u = machineStatusMap[m.gfrid] || {};
+      return total + (u.on_time_sec || 0);
+    }, 0);
+    const contribution = totalActiveSeconds > 0 
+      ? ((usage.on_time_sec || 0) / totalActiveSeconds) * 100 
+      : 0;
+    return {
+      machine,
+      contribution: contribution,
+    };
+  });
+  
   const renderItem = ({ item, index }) => (
     <MachineItem
       item={item}
       index={index}
       machineStatusMap={machineStatusMap}
+      machineContributions={machineContributions} // Pass contributions here
       navigation={navigation}
     />
   );
-
-  // Display a loading indicator when initial data is being fetched
+  
   if (loading && machines.length === 0) {
     return (
       <View style={styles.loadingContainer}>
-        <ActivityIndicator size="large" color={COLORS.accent} />
-        <Text style={styles.loadingText}>Loading machine data...</Text>
+        <ActivityIndicator size="large" color={COLORS.primary} />
+        <Text style={styles.loadingText}>Loading machinery data...</Text>
       </View>
     );
   }
-
+  
   return (
     <View style={styles.container}>
       <StatusBar barStyle="dark-content" backgroundColor={COLORS.background} />
-      <ScrollView
-        contentContainerStyle={styles.scrollContainer}
-        showsVerticalScrollIndicator={false}
-      >
-        {/* Header Section */}
-        <Animated.View
-          style={[
-            styles.headerContainer,
-            {
-              opacity: headerOpacity,
-              transform: [{ translateY: headerTranslateY }],
-            },
-          ]}
-        >
-          <View style={styles.headerTopRow}>
-            <Animated.Text
-              style={[
-                styles.welcomeText,
-                {
-                  transform: [{ scale: welcomeTextScale }, { translateX: welcomeTextTranslateX }],
-                  opacity: welcomeTextOpacity,
-                }
-              ]}
+      
+      {/* Header - Non-sticky */}
+      <Animated.View style={[
+        styles.headerContainer,
+        {
+          opacity: headerAnim,
+          transform: [{
+            translateY: headerAnim.interpolate({
+              inputRange: [0, 1],
+              outputRange: [-50, 0],
+            }),
+          }],
+        },
+      ]}>
+        <View style={styles.headerContent}>
+          <View style={styles.userInfo}>
+            {user?.avatar ? (
+              <ImageBackground 
+                source={{ uri: user.avatar }} 
+                style={styles.avatar}
+                imageStyle={styles.avatarImage}
+              />
+            ) : (
+              <View style={[styles.avatar, styles.avatarPlaceholder]}>
+                <MaterialIcons name="person" size={24} color="#FFF" />
+              </View>
+            )}
+            <View>
+              <Text style={styles.greeting}>Welcome back</Text>
+              <Text style={styles.userName}>
+                {user?.first_name || 'Operator'}
+              </Text>
+            </View>
+          </View>
+          <View style={styles.headerButtons}>
+            <TouchableOpacity 
+              onPress={() => setShowStats(!showStats)}
+              style={styles.statsToggleButton}
             >
-              {welcomeMessage}
-            </Animated.Text>
-            <TouchableOpacity onPress={toggleSearchBar} style={styles.searchToggleIcon}>
-              <Ionicons name="search" size={26} color={COLORS.textPrimary} />
+              <MaterialCommunityIcons 
+                name={showStats ? "chart-areaspline" : "chart-areaspline-variant"} 
+                size={24} 
+                color={COLORS.textPrimary} 
+              />
+            </TouchableOpacity>
+            <TouchableOpacity 
+              onPress={() => setShowSearch(!showSearch)}
+              style={styles.searchButton}
+            >
+              <Ionicons 
+                name={showSearch ? "close" : "search"} 
+                size={24} 
+                color={COLORS.textPrimary} 
+              />
             </TouchableOpacity>
           </View>
-          <Text style={styles.dashboardTitle}>Available Machines</Text>
+        </View>
+        
+        <Text style={styles.dashboardTitle}>Machinery Dashboard</Text>
+        <Text>★Last 1 hour</Text>
+      </Animated.View>
+      
+      {/* Toggleable Search Bar */}
+      {showSearch && (
+        <Animated.View style={[
+          styles.searchContainer,
+          {
+            opacity: searchAnim,
+            transform: [{
+              translateY: searchAnim.interpolate({
+                inputRange: [0, 1],
+                outputRange: [-20, 0],
+              }),
+            }],
+          },
+        ]}>
+          <Ionicons name="search" size={20} color={COLORS.textSecondary} />
+          <TextInput
+            style={styles.searchInput}
+            placeholder="Search machines by ID or name..."
+            placeholderTextColor={COLORS.textSecondary}
+            value={searchQuery}
+            onChangeText={setSearchQuery}
+            clearButtonMode="while-editing"
+          />
         </Animated.View>
-
-        {/* Search Bar Section (Conditionally rendered and animated) */}
-        {isSearchBarVisible && (
-          <Animated.View
-            style={[
-              styles.searchContainer,
-              {
-                opacity: searchBarOpacity,
-                transform: [{ translateY: searchBarTranslateY }],
-                // Ensures layout space is reserved even if hidden by opacity/translate
-                height: isSearchBarVisible ? 55 : 0,
-                marginBottom: isSearchBarVisible ? SPACING * 1.8 : 0,
-              },
-            ]}
-          >
-            <Ionicons name="search" size={20} color={COLORS.textSecondary} style={styles.searchIcon} />
-            <TextInput
-              style={styles.input}
-              placeholder="Search by Machine ID..."
-              value={searchGfrid}
-              onChangeText={setSearchGfrid}
-              placeholderTextColor={COLORS.textSecondary}
-              keyboardType="numeric"
-              maxLength={10}
+      )}
+      
+      {/* Content */}
+      <Animated.View style={[
+        styles.contentContainer,
+        { opacity: contentAnim }
+      ]}>
+        {filteredMachines.length === 0 ? (
+          <View style={styles.emptyState}>
+            <MaterialCommunityIcons 
+              name="engine-outline" 
+              size={60} 
+              color={COLORS.textSecondary} 
             />
-            {searchGfrid.length > 0 && (
-              <TouchableOpacity onPress={() => setSearchGfrid('')} style={styles.clearSearchIcon}>
-                <MaterialCommunityIcons name="close-circle" size={20} color={COLORS.textSecondary} />
-              </TouchableOpacity>
-            )}
-          </Animated.View>
-        )}
-
-        {/* Conditional rendering for no results or the machine list */}
-        {filteredMachines.length === 0 && !loading ? (
-          <View style={styles.noResultsContainer}>
-            <MaterialCommunityIcons name="alert-circle-outline" size={60} color={COLORS.textSecondary} />
-            <Text style={styles.noResultsText}>No machines found matching "{searchGfrid}".</Text>
-            {searchGfrid.length > 0 && (
-              <TouchableOpacity onPress={() => setSearchGfrid('')} style={styles.clearSearchButton}>
-                <Text style={styles.clearSearchButtonText}>Clear Search</Text>
+            <Text style={styles.emptyStateTitle}>No machines found</Text>
+            <Text style={styles.emptyStateText}>
+              {searchQuery ? 
+                'Try a different search term' : 
+                'No machinery data available'}
+            </Text>
+            {searchQuery && (
+              <TouchableOpacity 
+                style={styles.clearSearchButton}
+                onPress={() => setSearchQuery('')}
+              >
+                <Text style={styles.clearSearchButtonText}>Clear search</Text>
               </TouchableOpacity>
             )}
           </View>
         ) : (
-          <Animated.View style={{ opacity: listFadeIn }}>
-            <FlatList
-              data={Array.isArray(filteredMachines) ? filteredMachines : []}
-              keyExtractor={(item) => item.gfrid.toString()}
-              renderItem={renderItem}
-              scrollEnabled={false}
-              contentContainerStyle={styles.listContainer}
-              refreshing={loading && machines.length > 0}
-              onRefresh={fetchMachines}
-            />
-          </Animated.View>
+          <FlatList
+            data={filteredMachines}
+            renderItem={renderItem}
+            keyExtractor={item => item.gfrid.toString()}
+            contentContainerStyle={styles.listContainer}
+            showsVerticalScrollIndicator={false}
+            refreshing={refreshing}
+            onRefresh={fetchMachines}
+            ListHeaderComponent={
+              <>
+                {showStats && (
+                  <>
+                    <StatusSummary machines={filteredMachines} />
+                    <UtilizationDistribution 
+                      machines={filteredMachines} 
+                      machineStatusMap={machineStatusMap} 
+                    />
+                  </>
+                )}
+              </>
+            }
+          />
         )}
-      </ScrollView>
+      </Animated.View>
     </View>
   );
 };
 
-// --- START: StyleSheet for the New Vision ---
 const styles = StyleSheet.create({
   container: {
     flex: 1,
     backgroundColor: COLORS.background,
-    paddingTop: Platform.OS === 'android' ? StatusBar.currentHeight : 0,
-  },
-  scrollContainer: {
-    paddingHorizontal: SPACING,
-    paddingVertical: SPACING,
   },
   loadingContainer: {
     flex: 1,
@@ -449,205 +674,393 @@ const styles = StyleSheet.create({
     backgroundColor: COLORS.background,
   },
   loadingText: {
-    marginTop: SPACING,
-    fontSize: 18,
+    marginTop: 20,
+    fontSize: 16,
     color: COLORS.textPrimary,
-    fontWeight: '600',
   },
   headerContainer: {
-    marginBottom: SPACING * 1.5,
+    paddingHorizontal: SPACING,
+    paddingTop: Platform.OS === 'android' ? StatusBar.currentHeight + SPACING : SPACING,
+    paddingBottom: SPACING,
+    backgroundColor: COLORS.background,
   },
-  headerTopRow: {
+  headerContent: {
     flexDirection: 'row',
     justifyContent: 'space-between',
     alignItems: 'center',
-    marginBottom: SPACING / 2, // Adjusted to decrease margin below welcome text
+    marginBottom: SPACING,
   },
-  welcomeText: {
-    fontSize: 24, // Increased font size
-    fontWeight: '700', // Bolder
+  userInfo: {
+    flexDirection: 'row',
+    alignItems: 'center',
+  },
+  avatar: {
+    width: AVATAR_SIZE,
+    height: AVATAR_SIZE,
+    borderRadius: AVATAR_SIZE / 2,
+    marginRight: 12,
+    justifyContent: 'center',
+    alignItems: 'center',
+    backgroundColor: COLORS.primary,
+  },
+  avatarImage: {
+    borderRadius: AVATAR_SIZE / 2,
+  },
+  avatarPlaceholder: {
+    backgroundColor: COLORS.primary,
+  },
+  greeting: {
+    fontSize: 14,
     color: COLORS.textSecondary,
-    letterSpacing: -0.2,
-    // Removed marginBottom here as it's handled by headerTopRow's marginBottom
   },
-  searchToggleIcon: {
-    padding: 5, // Make icon easier to tap
+  userName: {
+    fontSize: 18,
+    fontWeight: '600',
+    color: COLORS.textPrimary,
+  },
+  headerButtons: {
+    flexDirection: 'row',
+  },
+  statsToggleButton: {
+    padding: 8,
+    marginRight: 8,
+  },
+  searchButton: {
+    padding: 8,
   },
   dashboardTitle: {
-    fontSize: 24, // Slightly larger for prominence
-    fontWeight: '800',
+    fontSize: 28,
+    fontWeight: '700',
     color: COLORS.textPrimary,
-    letterSpacing: -0.8, // Tighter letter spacing
+    marginTop: 5,
   },
   searchContainer: {
     flexDirection: 'row',
     alignItems: 'center',
     backgroundColor: COLORS.surface,
-    borderRadius: 12, // More rounded corners
-    paddingHorizontal: SPACING,
-    height: 55, // Taller search bar
-    marginBottom: SPACING * 1.8, // More space below search
-    borderWidth: 1,
-    borderColor: COLORS.border,
-    shadowColor: COLORS.shadowStrong, // Stronger shadow
-    shadowOffset: { width: 0, height: 4 }, // More pronounced shadow
-    shadowOpacity: 0.15,
-    shadowRadius: 10, // Larger shadow blur
-    elevation: 6, // Increased elevation for Android
-    overflow: 'hidden', // Crucial for height animation
-  },
-  searchIcon: {
-    marginRight: SPACING / 2,
-  },
-  input: {
-    flex: 1,
-    height: '100%',
-    fontSize: 17, // Slightly larger text input
-    color: COLORS.textPrimary,
-    paddingVertical: 0,
-  },
-  clearSearchIcon: {
-    marginLeft: SPACING / 2,
-    padding: 5,
-  },
-  listContainer: {
-    paddingBottom: SPACING, // Add some bottom padding to the list
-  },
-  machineTileWrapper: {
+    borderRadius: 12,
+    paddingHorizontal: 16,
+    paddingVertical: 12,
+    marginHorizontal: SPACING,
     marginBottom: SPACING,
-    borderRadius: 15, // More rounded corners for tiles
-    overflow: 'hidden',
-    shadowColor: COLORS.shadowStrong,
-    shadowOffset: { width: 0, height: 6 }, // More pronounced shadow
-    shadowOpacity: 0.2, // Slightly more opaque shadow
-    shadowRadius: 12, // Larger shadow blur
-    elevation: 8, // Increased elevation for Android
-  },
-  machineTile: {
-    backgroundColor: COLORS.surface,
-    borderRadius: 15,
-    overflow: 'hidden',
-    padding: SPACING * 1.2, // Slightly more padding inside the tile
-  },
-  statusPill: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    paddingHorizontal: 14, // Wider pill
-    paddingVertical: 7, // Taller pill
-    borderRadius: 25, // More rounded pill shape
-    alignSelf: 'flex-start',
-    marginBottom: SPACING * 1.2, // More space below the pill
-  },
-  statusPillText: {
-    fontSize: 15, // Slightly larger status text
-    fontWeight: '700',
-    color: COLORS.surface,
-    marginLeft: 8,
-    textTransform: 'uppercase',
-  },
-  tileContent: {
-    // No changes needed here
-  },
-  tileTitleContainer: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    marginBottom: 6,
-  },
-  titleIcon: {
-    marginRight: 8,
-  },
-  tileTitle: {
-    fontSize: 20, // Larger title
-    fontWeight: '700',
-    color: COLORS.textPrimary,
-  },
-  tileLastUpdate: {
-    fontSize: 14, // Slightly larger last update text
-    color: COLORS.textSecondary,
-    fontStyle: 'italic',
-    marginBottom: SPACING * 1.8, // More space below
-    borderBottomWidth: 1,
-    borderBottomColor: COLORS.border,
-    paddingBottom: SPACING / 1.5, // More padding below border
-  },
-  utilizationContainer: {
-    marginBottom: SPACING * 1.2, // More space below the bar
-  },
-  utilizationLabel: {
-    fontSize: 15, // Slightly larger label
-    fontWeight: '600',
-    color: COLORS.textPrimary,
-    marginBottom: 10, // More space above the bar
-  },
-  progressBarBackground: {
-    height: 14, // Thicker progress bar
-    backgroundColor: COLORS.utilizationBackground,
-    borderRadius: 7, // More rounded corners
-    overflow: 'hidden',
-    // Added shadow for better UI
     shadowColor: COLORS.shadow,
     shadowOffset: { width: 0, height: 2 },
     shadowOpacity: 0.1,
-    shadowRadius: 4,
-    elevation: 2,
+    shadowRadius: 8,
+    elevation: 3,
+  },
+  searchInput: {
+    flex: 1,
+    fontSize: 16,
+    color: COLORS.textPrimary,
+    marginLeft: 10,
+  },
+  contentContainer: {
+    flex: 1,
+    paddingHorizontal: SPACING,
+  },
+  listContainer: {
+    paddingBottom: SPACING * 2,
+  },
+  // Status Summary Styles
+  statusSummaryContainer: {
+    flexDirection: 'row',
+    justifyContent: 'space-around',
+    backgroundColor: COLORS.surface,
+    borderRadius: 12,
+    padding: SPACING,
+    marginBottom: SPACING,
+    shadowColor: COLORS.shadowDark,
+    shadowOffset: { width: 0, height: 2 },
+    shadowOpacity: 0.1,
+    shadowRadius: 8,
+    elevation: 3,
+  },
+  statusSummaryItem: {
+    flexDirection: 'row',
+    alignItems: 'center',
+  },
+  statusIndicator: {
+    width: 12,
+    height: 12,
+    borderRadius: 6,
+    marginRight: 8,
+  },
+  statusSummaryText: {
+    fontSize: 14,
+    color: COLORS.textPrimary,
+  },
+  // Utilization Distribution Styles
+  distributionContainer: {
+    backgroundColor: COLORS.surface,
+    borderRadius: 12,
+    padding: SPACING,
+    marginBottom: SPACING,
+    shadowColor: COLORS.shadowDark,
+    shadowOffset: { width: 0, height: 2 },
+    shadowOpacity: 0.1,
+    shadowRadius: 8,
+    elevation: 3,
+  },
+  sectionTitle: {
+    fontSize: 16,
+    fontWeight: '600',
+    color: COLORS.textPrimary,
+    marginBottom: 12,
+  },
+  overallUtilization: {
+    marginBottom: 16,
+  },
+  overallText: {
+    fontSize: 14,
+    color: COLORS.textPrimary,
+    marginBottom: 8,
+  },
+  overallBar: {
+    height: 10,
+    backgroundColor: COLORS.divider,
+    borderRadius: 5,
+    overflow: 'hidden',
+  },
+  overallBarFill: {
+    height: '100%',
+    borderRadius: 5,
+  },
+  sectionSubtitle: {
+    fontSize: 14,
+    fontWeight: '600',
+    color: COLORS.textPrimary,
+    marginBottom: 12,
+  },
+  distributionScroll: {
+    marginHorizontal: -SPACING,
+    paddingHorizontal: SPACING,
+  },
+  contributionItem: {
+    width: 60,
+    marginRight: 15,
+    alignItems: 'center',
+  },
+  contributionBarContainer: {
+    height: 100,
+    width: 30,
+    justifyContent: 'flex-end',
+    borderBottomWidth: 1,
+    borderBottomColor: COLORS.divider,
+  },
+  contributionBar: {
+    width: '100%',
+    borderTopLeftRadius: 4,
+    borderTopRightRadius: 4,
+  },
+  contributionLabel: {
+    marginTop: 8,
+    alignItems: 'center',
+  },
+  contributionText: {
+    fontSize: 10,
+    color: COLORS.textSecondary,
+    textAlign: 'center',
+  },
+  contributionPercent: {
+    fontSize: 12,
+    fontWeight: '600',
+    color: COLORS.textPrimary,
+    marginTop: 4,
+  },
+  contributionMinutes: {
+    fontSize: 10,
+    color: COLORS.textSecondary,
+  },
+  // Machine Card Styles
+  machineCardWrapper: {
+    marginBottom: SPACING,
+    shadowColor: COLORS.shadowDark,
+    shadowOffset: { width: 0, height: 6 },
+    shadowOpacity: 0.1,
+    shadowRadius: 12,
+    elevation: 5,
+  },
+  machineCard: {
+    backgroundColor: COLORS.surface,
+    borderRadius: 16,
+    overflow: 'hidden',
+  },
+  // This statusIndicator is for the vertical bar on the left of the card
+  statusIndicator: { 
+    position: 'absolute',
+    top: 0,
+    left: 0,
+    bottom: 0,
+    width: 6,
+  },
+  machineContent: {
+    padding: SPACING,
+    paddingLeft: SPACING + 10,
+  },
+  machineHeader: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    marginBottom: 12,
+  },
+  machineIcon: {
+    width: MACHINE_ICON_SIZE,
+    height: MACHINE_ICON_SIZE,
+    borderRadius: 10,
+    backgroundColor: 'rgba(74, 144, 226, 0.1)',
+    justifyContent: 'center',
+    alignItems: 'center',
+    marginRight: 12,
+  },
+  machineId: {
+    fontSize: 14,
+    color: COLORS.textSecondary,
+    marginBottom: 2,
+  },
+  machineName: {
+    fontSize: 18,
+    fontWeight: '600',
+    color: COLORS.textPrimary,
+  },
+  statusRow: {
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+    alignItems: 'center',
+    marginBottom: 16,
+  },
+  statusBadge: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    paddingHorizontal: 12,
+    paddingVertical: 6,
+    borderRadius: 20,
+  },
+  statusText: {
+    fontSize: 14,
+    fontWeight: '600',
+    color: '#FFF',
+    marginLeft: 6,
+  },
+  lastUpdated: {
+    flexDirection: 'row',
+    alignItems: 'center',
+  },
+  lastUpdatedText: {
+    fontSize: 12,
+    color: COLORS.textSecondary,
+    marginLeft: 4,
+  },
+  utilizationContainer: {
+    marginBottom: 16,
+  },
+  utilizationHeader: {
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+    marginBottom: 8,
+  },
+  utilizationLabel: {
+    fontSize: 12,
+    fontWeight: '600',
+    color: COLORS.textSecondary,
+    textTransform: 'uppercase',
+    letterSpacing: 0.5,
+  },
+  utilizationPercent: {
+    fontSize: 14,
+    fontWeight: '700',
+    color: COLORS.textPrimary,
+  },
+  progressBarBackground: {
+    height: 12,
+    backgroundColor: COLORS.divider,
+    borderRadius: 6,
+    overflow: 'visible', // Changed to 'visible' to allow markings to show
+    marginBottom: 4,
+    position: 'relative',
   },
   progressBarFill: {
     height: '100%',
-    // Background color is now handled by LinearGradient in the component
-    borderRadius: 7,
+    borderRadius: 6,
   },
-  runTimeMetric: {
+  progressBarMarkings: {
+    position: 'absolute',
+    top: 0,
+    left: 0,
+    right: 0,
+    bottom: 0,
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+    alignItems: 'center',
+  },
+  progressBarMark: {
+    position: 'absolute',
+    height: '100%',
+    alignItems: 'center',
+    justifyContent: 'flex-start',
+  },
+  progressBarMarkText: {
+    fontSize: 10,
+    color: COLORS.textSecondary,
+    position: 'absolute',
+    top: 15, // Position below the bar
+    transform: [{ translateX: -10 }], // Adjust to center text
+  },
+  progressBarMarkLine: {
+    width: 1,
+    height: 8,
+    backgroundColor: COLORS.textSecondary,
+    position: 'absolute',
+    top: '100%', // Starts from the bottom edge of the bar
+  },
+  metricsRow: {
+    flexDirection: 'row',
+    justifyContent: 'space-between', // Aligns items to ends
+    alignItems: 'center',
+  },
+  metricItem: {
     flexDirection: 'row',
     alignItems: 'center',
-    paddingTop: SPACING / 2,
   },
-  runTimeText: {
-    fontSize: 15, // Slightly larger runtime text
+  metricText: {
+    fontSize: 14,
     color: COLORS.textSecondary,
-    marginLeft: 10, // More space from icon
-    fontWeight: '500',
+    marginLeft: 8,
   },
-  noResultsContainer: {
+  machineContributionText: {
+    fontSize: 14,
+    fontWeight: '600',
+    color: COLORS.textPrimary,
+  },
+  emptyState: {
+    flex: 1,
     justifyContent: 'center',
     alignItems: 'center',
-    paddingVertical: SPACING * 2.5, // More vertical padding
-    backgroundColor: COLORS.surface,
-    borderRadius: 15, // More rounded corners
-    borderWidth: 1,
-    borderColor: COLORS.border,
-    shadowColor: COLORS.shadowStrong,
-    shadowOffset: { width: 0, height: 4 },
-    shadowOpacity: 0.15,
-    shadowRadius: 10,
-    elevation: 6,
-    marginTop: SPACING * 1.5,
+    padding: SPACING * 2,
   },
-  noResultsText: {
-    fontSize: 18, // Larger no results text
-    color: COLORS.textSecondary,
+  emptyStateTitle: {
+    fontSize: 20,
     fontWeight: '600',
-    marginTop: SPACING,
+    color: COLORS.textPrimary,
+    marginTop: 16,
+  },
+  emptyStateText: {
+    fontSize: 16,
+    color: COLORS.textSecondary,
     textAlign: 'center',
-    paddingHorizontal: SPACING,
-    lineHeight: 25, // Better line height
+    marginTop: 8,
   },
   clearSearchButton: {
-    marginTop: SPACING * 1.8, // More space above button
-    paddingVertical: 14, // Taller button
-    paddingHorizontal: 30, // Wider button
-    backgroundColor: COLORS.accent,
-    borderRadius: 30,
-    shadowColor: COLORS.shadowStrong,
-    shadowOffset: { width: 0, height: 4 },
-    shadowOpacity: 0.3, // More pronounced shadow for button
-    shadowRadius: 8,
-    elevation: 7, // Increased elevation
+    marginTop: 20,
+    paddingVertical: 10,
+    paddingHorizontal: 24,
+    backgroundColor: COLORS.primary,
+    borderRadius: 20,
   },
   clearSearchButtonText: {
-    color: COLORS.surface,
-    fontSize: 17, // Larger button text
-    fontWeight: '700',
+    color: '#FFF',
+    fontWeight: '600',
   },
+ 
 });
 
 export default MachineDashboard;
