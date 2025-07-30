@@ -49,7 +49,7 @@ def generate_random_data():
     alert = random.choice(alerts)
     # gfrid = random.choice([16, 17, 18, 19, 20, 21, 22,22]),
 
-    gfrid = "21"
+    gfrid = "22"
     status = random.randint(0, 1)
     
     # Generate data structure

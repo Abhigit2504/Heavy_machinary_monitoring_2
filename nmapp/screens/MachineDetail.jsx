@@ -201,7 +201,7 @@ const MachineDetail = ({ route }) => {
                   key={refreshKey}
                   gfrid={gfrid}
                   fromDate={fromDate}
-                  toDate={toDate}
+                  toDate={toDate} 
                   range={range}
                 />
               )}

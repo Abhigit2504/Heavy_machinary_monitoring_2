@@ -491,32 +491,44 @@ def download_user_logs_pdf(request):
             content_type='application/json'
         )
 
-    # views.py
+  
+
+
+
 import io
-import pytz
-import json
 import logging
 from datetime import datetime
-from django.http import HttpResponse
 from django.db.models import Q
-from reportlab.lib.pagesizes import A4
-from reportlab.lib import colors
-from reportlab.platypus import SimpleDocTemplate, Table, TableStyle, Paragraph, Spacer
-from reportlab.lib.styles import getSampleStyleSheet
+from django.http import HttpResponse
 from rest_framework.decorators import api_view, permission_classes
 from rest_framework.permissions import IsAuthenticated
 from rest_framework.response import Response
 from rest_framework import status
-from .models import UserSessionLog, PageVisitLog
+import pytz
+from reportlab.lib.pagesizes import A4
+from reportlab.platypus import SimpleDocTemplate, Paragraph, Spacer, Table, TableStyle
+from reportlab.lib.styles import getSampleStyleSheet
+from reportlab.lib import colors
 
 logger = logging.getLogger(__name__)
-
 @api_view(['GET'])
 @permission_classes([IsAuthenticated])
 def download_user_logs_pdf(request):
+    import io
+    import json
+    from django.http import HttpResponse
+    from django.db.models import Q
+    from reportlab.lib.pagesizes import A4
+    from reportlab.platypus import SimpleDocTemplate, Paragraph, Spacer, Table, TableStyle
+    from reportlab.lib.styles import getSampleStyleSheet
+    from reportlab.lib import colors
+    from dateutil import parser
+    import pytz
+    from datetime import datetime
+
     user = request.user
     kolkata_tz = pytz.timezone("Asia/Kolkata")
-    
+
     try:
         session_id = request.GET.get('session_id')
         start_datetime_str = request.GET.get('start_datetime')
@@ -528,15 +540,20 @@ def download_user_logs_pdf(request):
             f"start={start_datetime_str}, end={end_datetime_str}"
         )
 
+        # ✅ Improved datetime parsing
         def parse_datetime(dt_str):
             if not dt_str:
                 return None
             try:
-                dt = datetime.strptime(dt_str, '%Y-%m-%dT%H:%M')
-                return kolkata_tz.localize(dt)
-            except ValueError:
-                logger.warning(f"Invalid datetime format: {dt_str}")
-                raise ValueError("Invalid datetime format. Expected YYYY-MM-DDTHH:MM")
+                dt = parser.isoparse(dt_str)  # Handles ISO 8601 with timezone
+                if dt.tzinfo is None:
+                    dt = kolkata_tz.localize(dt)
+                else:
+                    dt = dt.astimezone(kolkata_tz)
+                return dt
+            except Exception as e:
+                logger.warning(f"Invalid datetime format: {dt_str} - {str(e)}")
+                raise ValueError("Invalid datetime format. Expected ISO 8601 (e.g., 2025-07-30T09:00:00Z)")
 
         start_datetime = parse_datetime(start_datetime_str)
         end_datetime = parse_datetime(end_datetime_str)
@@ -553,9 +570,11 @@ def download_user_logs_pdf(request):
         elements = []
         styles = getSampleStyleSheet()
 
+        # Title
         elements.append(Paragraph("USER ACTIVITY REPORT", styles['Heading1']))
         elements.append(Spacer(1, 12))
 
+        # Filters info
         filter_info = []
         if session_id:
             filter_info.append(f"Session ID: {session_id}")
@@ -573,6 +592,7 @@ def download_user_logs_pdf(request):
         ))
         elements.append(Spacer(1, 15))
 
+        # Fetch user sessions
         sessions = UserSessionLog.objects.filter(user=user)
         if session_id:
             sessions = sessions.filter(id=session_id)
@@ -620,6 +640,7 @@ def download_user_logs_pdf(request):
                 elements.append(session_table)
                 elements.append(Spacer(1, 15))
 
+                # Fetch page visits
                 visits = PageVisitLog.objects.filter(session=session)
                 if start_datetime:
                     visits = visits.filter(visited_at__gte=start_datetime)
@@ -630,9 +651,7 @@ def download_user_logs_pdf(request):
                 logger.debug(f"Found {visits.count()} visits for session {session.id}")
 
                 if visits.exists():
-                    table_data = [
-                        ["Page Name", "Visit Time", "Filters Applied"]
-                    ]
+                    table_data = [["Page Name", "Visit Time", "Filters Applied"]]
 
                     for visit in visits:
                         visit_time = visit.visited_at.astimezone(kolkata_tz)
@@ -688,8 +707,7 @@ def download_user_logs_pdf(request):
             status=status.HTTP_200_OK
         )
         response['Content-Disposition'] = (
-            f'attachment; filename="user_activity_'
-            f'{datetime.now().strftime("%Y%m%d_%H%M")}.pdf"'
+            f'attachment; filename="user_activity_{datetime.now().strftime("%Y%m%d_%H%M")}.pdf"'
         )
         response['Content-Length'] = len(pdf_content)
         return response
@@ -708,8 +726,3 @@ def download_user_logs_pdf(request):
             status=status.HTTP_500_INTERNAL_SERVER_ERROR,
             content_type='application/json'
         )
-
-
-
-
-

@@ -438,6 +438,10 @@ const MachineDashboard = ({ navigation }) => {
     fetchUser();
     fetchMachines();
     
+    // The header and content animations will now be part of the FlatList's initial render
+    // and subsequent updates. You might want to adjust or remove these animations 
+    // if they cause visual glitches with the ListHeaderComponent.
+    // For now, let's keep them and see how they behave.
     Animated.parallel([
       Animated.timing(headerAnim, {
         toValue: 1,
@@ -455,7 +459,7 @@ const MachineDashboard = ({ navigation }) => {
       }),
     ]).start();
     
-    const interval = setInterval(fetchMachines, 30000);
+    const interval = setInterval(fetchMachines, 3000);
     return () => clearInterval(interval);
   }, []);
   
@@ -519,96 +523,9 @@ const MachineDashboard = ({ navigation }) => {
     <View style={styles.container}>
       <StatusBar barStyle="dark-content" backgroundColor={COLORS.background} />
       
-      {/* Header - Non-sticky */}
+      {/* Content now includes the header and search bar via ListHeaderComponent */}
       <Animated.View style={[
-        styles.headerContainer,
-        {
-          opacity: headerAnim,
-          transform: [{
-            translateY: headerAnim.interpolate({
-              inputRange: [0, 1],
-              outputRange: [-50, 0],
-            }),
-          }],
-        },
-      ]}>
-        <View style={styles.headerContent}>
-          <View style={styles.userInfo}>
-            {user?.avatar ? (
-              <ImageBackground 
-                source={{ uri: user.avatar }} 
-                style={styles.avatar}
-                imageStyle={styles.avatarImage}
-              />
-            ) : (
-              <View style={[styles.avatar, styles.avatarPlaceholder]}>
-                <MaterialIcons name="person" size={24} color="#FFF" />
-              </View>
-            )}
-            <View>
-              <Text style={styles.greeting}>Welcome back</Text>
-              <Text style={styles.userName}>
-                {user?.first_name || 'Operator'}
-              </Text>
-            </View>
-          </View>
-          <View style={styles.headerButtons}>
-            <TouchableOpacity 
-              onPress={() => setShowStats(!showStats)}
-              style={styles.statsToggleButton}
-            >
-              <MaterialCommunityIcons 
-                name={showStats ? "chart-areaspline" : "chart-areaspline-variant"} 
-                size={24} 
-                color={COLORS.textPrimary} 
-              />
-            </TouchableOpacity>
-            <TouchableOpacity 
-              onPress={() => setShowSearch(!showSearch)}
-              style={styles.searchButton}
-            >
-              <Ionicons 
-                name={showSearch ? "close" : "search"} 
-                size={24} 
-                color={COLORS.textPrimary} 
-              />
-            </TouchableOpacity>
-          </View>
-        </View>
-        
-        <Text style={styles.dashboardTitle}>Machinery Dashboard</Text>
-        <Text>★Last 1 hour</Text>
-      </Animated.View>
-      
-      {/* Toggleable Search Bar */}
-      {showSearch && (
-        <Animated.View style={[
-          styles.searchContainer,
-          {
-            opacity: searchAnim,
-            transform: [{
-              translateY: searchAnim.interpolate({
-                inputRange: [0, 1],
-                outputRange: [-20, 0],
-              }),
-            }],
-          },
-        ]}>
-          <Ionicons name="search" size={20} color={COLORS.textSecondary} />
-          <TextInput
-            style={styles.searchInput}
-            placeholder="Search machines by ID or name..."
-            placeholderTextColor={COLORS.textSecondary}
-            value={searchQuery}
-            onChangeText={setSearchQuery}
-            clearButtonMode="while-editing"
-          />
-        </Animated.View>
-      )}
-      
-      {/* Content */}
-      <Animated.View style={[
-        styles.contentContainer,
+        styles.contentContainer, // Apply some base styling
         { opacity: contentAnim }
       ]}>
         {filteredMachines.length === 0 ? (
@@ -644,6 +561,93 @@ const MachineDashboard = ({ navigation }) => {
             onRefresh={fetchMachines}
             ListHeaderComponent={
               <>
+                {/* Header - Now part of the scrollable content */}
+                <Animated.View style={[
+                  styles.headerContainer,
+                  {
+                    opacity: headerAnim,
+                    transform: [{
+                      translateY: headerAnim.interpolate({
+                        inputRange: [0, 1],
+                        outputRange: [-50, 0],
+                      }),
+                    }],
+                  },
+                ]}>
+                  <View style={styles.headerContent}>
+                    <View style={styles.userInfo}>
+                      {user?.avatar ? (
+                        <ImageBackground 
+                          source={{ uri: user.avatar }} 
+                          style={styles.avatar}
+                          imageStyle={styles.avatarImage}
+                        />
+                      ) : (
+                        <View style={[styles.avatar, styles.avatarPlaceholder]}>
+                          <MaterialIcons name="person" size={24} color="#FFF" />
+                        </View>
+                      )}
+                      <View>
+                        <Text style={styles.greeting}>Welcome back</Text>
+                        <Text style={styles.userName}>
+                          {user?.first_name || 'Operator'}
+                        </Text>
+                      </View>
+                    </View>
+                    <View style={styles.headerButtons}>
+                      <TouchableOpacity 
+                        onPress={() => setShowStats(!showStats)}
+                        style={styles.statsToggleButton}
+                      >
+                        <MaterialCommunityIcons 
+                          name={showStats ? "chart-areaspline" : "chart-areaspline-variant"} 
+                          size={24} 
+                          color={COLORS.textPrimary} 
+                        />
+                      </TouchableOpacity>
+                      <TouchableOpacity 
+                        onPress={() => setShowSearch(!showSearch)}
+                        style={styles.searchButton}
+                      >
+                        <Ionicons 
+                          name={showSearch ? "close" : "search"} 
+                          size={24} 
+                          color={COLORS.textPrimary} 
+                        />
+                      </TouchableOpacity>
+                    </View>
+                  </View>
+                  
+                  <Text style={styles.dashboardTitle}>Machinery Dashboard</Text>
+                  <Text>★Last 1 hour</Text>
+                </Animated.View>
+                
+                {/* Toggleable Search Bar - Also part of scrollable content */}
+                {showSearch && (
+                  <Animated.View style={[
+                    styles.searchContainer,
+                    {
+                      opacity: searchAnim,
+                      transform: [{
+                        translateY: searchAnim.interpolate({
+                          inputRange: [0, 1],
+                          outputRange: [-20, 0],
+                        }),
+                      }],
+                    },
+                  ]}>
+                    <Ionicons name="search" size={20} color={COLORS.textSecondary} />
+                    <TextInput
+                      style={styles.searchInput}
+                      placeholder="Search machines by ID or name..."
+                      placeholderTextColor={COLORS.textSecondary}
+                      value={searchQuery}
+                      onChangeText={setSearchQuery}
+                      clearButtonMode="while-editing"
+                    />
+                  </Animated.View>
+                )}
+
                 {showStats && (
                   <>
                     <StatusSummary machines={filteredMachines} />
@@ -757,9 +761,10 @@ const styles = StyleSheet.create({
   },
   contentContainer: {
     flex: 1,
-    paddingHorizontal: SPACING,
+    // Removed paddingHorizontal here because it's now applied in listContainer
   },
   listContainer: {
+    paddingHorizontal: SPACING, // Apply padding to the entire list content
     paddingBottom: SPACING * 2,
   },
   // Status Summary Styles
@@ -1060,7 +1065,7 @@ const styles = StyleSheet.create({
     color: '#FFF',
     fontWeight: '600',
   },
- 
+  
 });
 
 export default MachineDashboard;

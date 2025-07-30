@@ -25,8 +25,7 @@ import timezone from 'dayjs/plugin/timezone';
 // Import the UptimeBarChart component
 import UptimeBarChart from '../components/UptimeBarChart ';
 
-// Assume logPageVisit and BASE_URL are defined elsewhere,
-// similar to MachineDetail.js
+// Assume logPageVisit and BASE_URL are defined elsewhere
 import { logPageVisit } from '../api/LogsApi';
 import { BASE_URL } from '../config';
 
@@ -41,6 +40,23 @@ const PRIMARY_COLOR = '#5279a8';
 const SECONDARY_COLOR = '#4a8c7e';
 const LIGHT_BACKGROUND = '#f8f9fa';
 
+// Debounce hook
+function useDebounce(value, delay) {
+  const [debouncedValue, setDebouncedValue] = useState(value);
+  
+  useEffect(() => {
+    const handler = setTimeout(() => {
+      setDebouncedValue(value);
+    }, delay);
+
+    return () => {
+      clearTimeout(handler);
+    };
+  }, [value, delay]);
+
+  return debouncedValue;
+}
+
 const InfoWrapper = () => {
   const navigation = useNavigation();
 
@@ -51,14 +67,10 @@ const InfoWrapper = () => {
   const searchBarAnim = useState(new Animated.Value(0))[0];
 
   // State management for date/time and range
-  const [fromDate, setFromDate] = useState(
-    new Date(Date.now() - 3600000) // Default to last hour
-  );
+  const [fromDate, setFromDate] = useState(new Date(Date.now() - 3600000));
   const [toDate, setToDate] = useState(new Date());
   const [range, setRange] = useState('1h');
-
   const [refreshKey, setRefreshKey] = useState(0);
-
   const [showFromPicker, setShowFromPicker] = useState(false);
   const [showToPicker, setShowToPicker] = useState(false);
 
@@ -70,11 +82,15 @@ const InfoWrapper = () => {
   const [error, setError] = useState(null);
   const [refreshing, setRefreshing] = useState(false);
   const [searchQuery, setSearchQuery] = useState('');
+  const debouncedSearchQuery = useDebounce(searchQuery, 1000);
   const [isSearchBarEnabled, setIsSearchBarEnabled] = useState(false);
   const searchInputRef = useRef(null);
 
-  // Ref for the automatic refresh interval
+  // Refs for tracking changes and automatic refresh
   const refreshIntervalRef = useRef(null);
+  const isInitialLoad = useRef(true);
+  const lastSearchQuery = useRef('');
+  const lastRange = useRef('');
 
   // Run animations on mount
   useEffect(() => {
@@ -282,15 +298,15 @@ const InfoWrapper = () => {
 
   // Filter data based on search query
   useEffect(() => {
-    if (searchQuery.trim() === '') {
+    if (debouncedSearchQuery.trim() === '') {
       setFilteredData(machineData);
     } else {
       const filtered = machineData.filter((machine) =>
-        machine.gfrid.toString().includes(searchQuery.trim())
+        machine.gfrid.toString().includes(debouncedSearchQuery.trim())
       );
       setFilteredData(filtered);
     }
-  }, [searchQuery, machineData]);
+  }, [debouncedSearchQuery, machineData]);
 
   // Initial data load or when date range changes
   useEffect(() => {
@@ -299,24 +315,41 @@ const InfoWrapper = () => {
     }
   }, [fromDate, toDate, loadData, refreshKey]);
 
-  // Log page visit
-useEffect(() => {
-  if (!loading && machines.length > 0 && fromDate && toDate) {
-    const gfrid = machines.map((m) => m.gfrid || m.id).join(',');
-    const fromDateLog = dayjs(fromDate).format('D MMM YYYY, hh:mm A');
-    const toDateLog = dayjs(toDate).format('D MMM YYYY, hh:mm A');
+  // Log page visit only when:
+  // 1. Initial load
+  // 2. Search query changes
+  // 3. Range changes (to custom or between predefined ranges)
+  // 4. Manual refresh
+  useEffect(() => {
+    if (!loading && machines.length > 0 && fromDate && toDate) {
+      const shouldLog = 
+        isInitialLoad.current || 
+        debouncedSearchQuery !== lastSearchQuery.current || 
+        range !== lastRange.current ||
+        refreshing;
+      
+      if (shouldLog) {
+        const gfrid = machines.map((m) => m.gfrid || m.id).join(',');
+        const fromDateLog = dayjs(fromDate).format('D MMM YYYY, hh:mm A');
+        const toDateLog = dayjs(toDate).format('D MMM YYYY, hh:mm A');
 
-    logPageVisit('Info Page', {
-      gfrid: gfrid || 'all',
-      from: fromDateLog,
-      to: toDateLog,
-      range: range || 'custom',
-    }).catch((err) => {
-      console.error('Visit log failed:', err.message);
-    });
-  }
-}, [range, machines, fromDate, toDate, loading]);
+        logPageVisit('Info Page', {
+          gfrid: gfrid || 'all',
+          from: fromDateLog,
+          to: toDateLog,
+          range: range || 'custom',
+          searchQuery: debouncedSearchQuery || '',
+        }).catch((err) => {
+          console.error('Visit log failed:', err.message);
+        });
 
+        // Update refs
+        lastSearchQuery.current = debouncedSearchQuery;
+        lastRange.current = range;
+        isInitialLoad.current = false;
+      }
+    }
+  }, [range, machines, fromDate, toDate, loading, debouncedSearchQuery, refreshing]);
 
   // Calculate aggregates
   const calculateAggregates = useCallback(() => {
@@ -595,9 +628,8 @@ useEffect(() => {
             <Icon name="calendar-today" size={20} color={PRIMARY_COLOR} />
             <Text style={styles.timeRangeText}>
               {range === 'custom' && fromDate && toDate
-              
-                ? `From:${formatDate(fromDate)}\nTo:${formatDate(toDate)}`
-                : `From${formatDate(fromDate)}\nto:${formatDate(toDate)}`}
+                ? `From: ${formatDate(fromDate)}\nTo: ${formatDate(toDate)}`
+                : `From ${formatDate(fromDate)}\nto: ${formatDate(toDate)}`}
             </Text>
           </View>
 
@@ -607,14 +639,12 @@ useEffect(() => {
                 style={styles.dateButton}
                 onPress={() => setShowFromPicker(true)}>
                 <Text style={styles.dateButtonText}>From: {`\n${formatDate(fromDate)}`}</Text>
-                {/* <Icon name="edit-calendar" size={20} color={PRIMARY_COLOR} /> */}
               </TouchableOpacity>
 
               <TouchableOpacity
                 style={styles.dateButton}
                 onPress={() => setShowToPicker(true)}>
                 <Text style={styles.dateButtonText}>To: {`\n${formatDate(toDate)}`}</Text>
-                {/* <Icon name="edit-calendar" size={20} color={PRIMARY_COLOR} /> */}
               </TouchableOpacity>
             </View>
           )}
@@ -791,6 +821,7 @@ useEffect(() => {
     </Animated.View>
   );
 };
+
 
 const styles = StyleSheet.create({
   container: {
