@@ -245,39 +245,75 @@ const endDateTime = new Date(
     }
   };
 
-  const handleDownloadPress = (logId) => {
-    navigation.navigate('DownloadScreen', {
-      sessionId: logId,
-      searchText,
-      startDate: startDate.toISOString().split('T')[0],
-      endDate: endDate.toISOString().split('T')[0]
-    });
-  };
-
-  const handleDeleteLog = async (logId) => {
-    Alert.alert('Delete Log', 'Are you sure you want to delete this log?', [
-      { text: 'Cancel', style: 'cancel' },
+ const handleDeleteLog = async (logId) => {
+  Alert.alert(
+    'Delete Log',
+    'Are you sure you want to delete this log? This action cannot be undone.',
+    [
+      {
+        text: 'Cancel',
+        style: 'cancel',
+      },
       {
         text: 'Delete',
         style: 'destructive',
         onPress: async () => {
           try {
-            const headers = await getAuthHeaders();
-            if (!headers) {
-              throw new Error('Authentication required');
+            // Get auth headers
+            const user = await AsyncStorage.getItem('user');
+            if (!user) {
+              throw new Error('User not authenticated');
             }
             
-            await axios.delete(`${BASE_URL}/api/auth/logs/${logId}/`, headers);
-            await loadLogs();
-            closeLogModal();
-          } catch (err) {
-            Alert.alert("Error", "Failed to delete log");
+            const parsedUser = JSON.parse(user);
+            const token = parsedUser.token;
+            
+            if (!token) {
+              throw new Error('No authentication token found');
+            }
+
+            // Make the delete request
+            const response = await axios.delete(
+              `${BASE_URL}/api/auth/logs/delete/${logId}/`,
+              {
+                headers: {
+                  'Authorization': `Bearer ${token}`,
+                  'Content-Type': 'application/json'
+                }
+              }
+            );
+
+            // Check response
+            if (response.status === 200) {
+              Alert.alert('Success', 'Log deleted successfully');
+              await loadLogs(); // Refresh the logs list
+              if (selectedLog?.id === logId) {
+                closeLogModal(); // Close modal if deleting the currently viewed log
+              }
+            } else {
+              throw new Error('Failed to delete log');
+            }
+          } catch (error) {
+            console.error('Delete error:', {
+              message: error.message,
+              response: error.response?.data,
+              status: error.response?.status
+            });
+            
+            let errorMessage = 'Failed to delete log';
+            if (error.response?.data?.error) {
+              errorMessage = error.response.data.error;
+            } else if (error.message) {
+              errorMessage = error.message;
+            }
+            
+            Alert.alert('Error', errorMessage);
           }
         },
       },
-    ]);
-  };
-
+    ]
+  );
+};
   const openLogModal = async (log) => {
     try {
       if (Platform.OS !== 'web') {

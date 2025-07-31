@@ -1014,7 +1014,7 @@ const styles = StyleSheet.create({
   },
   summaryCard1: {
     width: '48%',
-    backgroundColor: '#91c1e7ff',
+    backgroundColor: '#b3c5d3ff',
     borderRadius: 12,
     padding: 20,
     marginTop:10,
@@ -1030,7 +1030,7 @@ const styles = StyleSheet.create({
   },
     summaryCard2: {
     width: '48%',
-    backgroundColor: '#9ca432ff',
+    backgroundColor: '#dfe2aeff',
     borderRadius: 12,
     padding: 20,
     marginTop:10,
@@ -1046,7 +1046,7 @@ const styles = StyleSheet.create({
   },
     summaryCard3: {
     width: '48%',
-    backgroundColor: '#d7746dff',
+    backgroundColor: '#e4bab7ff',
     borderRadius: 12,
     padding: 20,
     marginTop:10,
@@ -1062,7 +1062,7 @@ const styles = StyleSheet.create({
   },
     summaryCard4: {
     width: '48%',
-    backgroundColor: '#11b9abff',
+    backgroundColor: '#97e8e1ff',
     borderRadius: 12,
     padding: 20,
     marginTop:10,
@@ -1078,15 +1078,15 @@ const styles = StyleSheet.create({
   },
   summaryLabel: {
     fontSize: 16,
-    color: '#fafdffff',
+    color: '#000000ff',
     marginTop: 12,
     textAlign: 'center',
-    fontWeight: '500',
+    fontWeight: '900',
   },
   summaryValue: {
     fontSize: 20,
     fontWeight: '700',
-    color: '#ffffffff',
+    color: '#000000ff',
     marginTop: 8,
   },
   sectionTitle: {

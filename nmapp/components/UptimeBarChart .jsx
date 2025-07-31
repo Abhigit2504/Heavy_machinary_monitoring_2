@@ -63,7 +63,7 @@ const UptimeBarChart = ({ chartData, chartScale }) => {
       ]}
     >
       <View style={styles.titleContainer}>
-        <Text style={styles.sectionTitle}>Machine Prioritization</Text>
+        <Text style={styles.sectionTitle}>Machine Utilization</Text>
         <Text style={styles.chartSubtitle}>Machines sorted by work %</Text>
       </View>
 
